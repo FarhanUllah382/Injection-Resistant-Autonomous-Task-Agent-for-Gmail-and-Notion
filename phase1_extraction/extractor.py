@@ -55,8 +55,15 @@ class Extractor:
                 ]
             )
             
-            # Extract response text
-            response_text = response.content[0].text.strip()
+            # Extract response text. content[0] isn't always the text block —
+            # the model can prepend a ThinkingBlock, which has no .text attr.
+            text_block = next((b for b in response.content if b.type == "text"), None)
+            if text_block is None:
+                raise ExtractionError(
+                    f"No text block in Claude response. Block types: "
+                    f"{[b.type for b in response.content]}"
+                )
+            response_text = text_block.text.strip()
             
             # Remove markdown code fence if present
             if response_text.startswith("```json"):

@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, and_, or_, select
 
 from app.config import CONFIDENCE_THRESHOLD
 from app.db import get_session
@@ -68,11 +68,29 @@ def _serialize(candidate: TaskCandidate, email: Email) -> dict:
 
 
 @router.get("")
-def list_candidates(status: str = "pending", session: Session = Depends(get_session)):
+def list_candidates(status: Optional[str] = None, session: Session = Depends(get_session)):
     query = select(TaskCandidate, Email).join(Email, TaskCandidate.email_id == Email.id)
-    query = query.where(TaskCandidate.status == status)
-    if status == "pending":
-        query = query.where(TaskCandidate.claude_confidence >= CONFIDENCE_THRESHOLD)
+
+    if status is not None:
+        # Explicit status requested (e.g. "approved", "dismissed") — exact match,
+        # no threshold. Once a status is decided, confidence no longer matters.
+        query = query.where(TaskCandidate.status == status)
+    else:
+        # Default "review queue": freshly-extracted candidates above the confidence
+        # threshold, plus anything already edited. An edited candidate has already
+        # been looked at by a human, so it stays in the queue regardless of its
+        # original confidence — otherwise editing one would silently vanish it
+        # from view with no way to ever approve or dismiss it.
+        query = query.where(
+            or_(
+                and_(
+                    TaskCandidate.status == "pending",
+                    TaskCandidate.claude_confidence >= CONFIDENCE_THRESHOLD,
+                ),
+                TaskCandidate.status == "edited",
+            )
+        )
+
     query = query.order_by(TaskCandidate.claude_confidence.desc())
 
     rows = session.exec(query).all()

@@ -73,7 +73,8 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
 
         try:
             result = extractor.extract(email_data, thread_context)
-        except ExtractionError:
+        except ExtractionError as e:
+            print(f"[extract] email {email.id} ({email.subject!r}) failed: {e}")
             failed += 1
             continue  # leave extracted_at null so it's retried on the next /extract call
 
