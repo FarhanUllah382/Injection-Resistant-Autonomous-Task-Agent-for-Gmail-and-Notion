@@ -5,6 +5,11 @@ Reuses the Phase 1 extractor unchanged. Deliberately stops at candidate
 creation: no approval/edit logic and no Notion sync here (see CLAUDE.md
 build order — those are separate phases). Synchronous, single request,
 one email at a time — no background worker.
+
+Ahead of extraction, each email passes through Triage (app/triage.py) —
+a deterministic pre-filter, no LLM call (Design Decisions V2.2). Only
+obviously non-actionable emails are skipped; extraction_prompt.py and
+extractor.py are otherwise reached exactly as in V2.1, unchanged.
 """
 
 from datetime import datetime, timezone as dt_timezone
@@ -16,6 +21,7 @@ from app.config import THREAD_CONTEXT_DEPTH
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
 from app.models import Email, TaskCandidate, User
+from app.triage import should_triage_out
 from phase1_extraction.extractor import Extractor, ExtractionError
 
 router = APIRouter(tags=["extract"])
@@ -49,7 +55,13 @@ def _build_thread_context(session: Session, email: Email) -> str:
 def extract(max_emails: int = 20, session: Session = Depends(get_session)):
     user = session.exec(select(User)).first()
     if user is None:
-        return {"processed": 0, "candidates_created": 0, "not_actionable": 0, "failed": 0}
+        return {
+            "processed": 0,
+            "candidates_created": 0,
+            "not_actionable": 0,
+            "triaged_out": 0,
+            "failed": 0,
+        }
 
     pending = session.exec(
         select(Email)
@@ -61,9 +73,18 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
     extractor = Extractor()
     candidates_created = 0
     not_actionable = 0
+    triaged_out = 0
     failed = 0
 
     for email in pending:
+        if should_triage_out(email):
+            print(f"[extract] email {email.id} ({email.subject!r}) triaged out — skipped extraction")
+            triaged_out += 1
+            email.extracted_at = datetime.now(dt_timezone.utc)
+            session.add(email)
+            session.commit()
+            continue
+
         thread_context = _build_thread_context(session, email)
         email_data = {
             "from": email.from_address,
@@ -105,5 +126,6 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
         "processed": len(pending) - failed,
         "candidates_created": candidates_created,
         "not_actionable": not_actionable,
+        "triaged_out": triaged_out,
         "failed": failed,
     }

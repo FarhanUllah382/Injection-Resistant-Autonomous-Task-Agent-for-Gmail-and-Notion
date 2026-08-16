@@ -31,3 +31,11 @@ USER_TIMEZONE = os.getenv("USER_TIMEZONE")
 # Notion (Phase 4)
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+
+# Triage (V2.2) — deterministic pre-filter ahead of extraction (Design
+# Decisions V2.2, Decision 2). Empty blocklist by default: matches Decision
+# 3's fail-open policy — nothing is blocked by domain until the user
+# explicitly configures one. User-editable, same convention as
+# CONFIDENCE_THRESHOLD.
+TRIAGE_BLOCKED_DOMAINS: list[str] = []
+ACTION_KEYWORDS = ["please", "review", "due", "deadline", "assign"]
