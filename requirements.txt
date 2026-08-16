@@ -13,3 +13,8 @@ beautifulsoup4>=4.12.3
 
 # Phase 4: Notion — official SDK for the single page-create call on approve
 notion-client>=2.2.1
+
+# V2.1: MCP client/server SDK — backend talks to mcp_servers/*/server.py over
+# stdio (Design Decisions V2.1, Decision 3); pinned <2.0 for the stable
+# FastMCP/stdio-client API (2.x renamed the server API and is very new)
+mcp>=1.6.0,<2.0.0

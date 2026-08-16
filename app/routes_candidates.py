@@ -15,11 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, and_, or_, select
 
-from app.config import CONFIDENCE_THRESHOLD
+from app.config import CONFIDENCE_THRESHOLD, NOTION_API_KEY, NOTION_DATABASE_ID
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
+from app.mcp_clients import notion_session, unwrap
 from app.models import Email, NotionTask, TaskCandidate, User, UserDecision
-from app.notion_client import NotionSyncError, create_task_page
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -154,7 +154,7 @@ def edit_candidate(candidate_id: int, edit: CandidateEdit, session: Session = De
 
 
 @router.post("/{candidate_id}/approve")
-def approve_candidate(candidate_id: int, session: Session = Depends(get_session)):
+async def approve_candidate(candidate_id: int, session: Session = Depends(get_session)):
     user = _get_single_user(session)
     candidate = _get_candidate(session, candidate_id)
     email = session.get(Email, candidate.email_id)
@@ -174,17 +174,26 @@ def approve_candidate(candidate_id: int, session: Session = Depends(get_session)
     resolved_due_date = resolve_deadline_phrase(deadline_phrase, email.received_at, user.timezone)
 
     # Create the Notion page before touching candidate state — if this fails,
-    # nothing changes and the user can just click Approve again.
-    try:
-        notion_page_id = create_task_page(
-            task=task,
-            resolved_due_date=resolved_due_date,
-            assignee=assignee,
-            reason=candidate.claude_reason,
-            gmail_link=_gmail_link(email.message_id),
+    # nothing changes and the user can just click Approve again. Goes
+    # through the Notion MCP server (mcp_servers/notion_mcp), which wraps
+    # app/notion_client.py unchanged — same Notion SDK call as V1, new
+    # transport (Design Decisions V2.1, Decisions 2 & 5).
+    async with notion_session(NOTION_API_KEY, NOTION_DATABASE_ID) as mcp:
+        result = unwrap(
+            await mcp.call_tool(
+                "create_notion_task",
+                {
+                    "task": task,
+                    "reason": candidate.claude_reason,
+                    "gmail_link": _gmail_link(email.message_id),
+                    "resolved_due_date": resolved_due_date.isoformat() if resolved_due_date else None,
+                    "assignee": assignee,
+                },
+            )
         )
-    except NotionSyncError as e:
-        raise HTTPException(502, f"Failed to create Notion task: {e}") from e
+    if "error" in result:
+        raise HTTPException(502, f"Failed to create Notion task: {result['error']}")
+    notion_page_id = result["page_id"]
 
     candidate.resolved_due_date = resolved_due_date
     candidate.status = "approved"
