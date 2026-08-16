@@ -112,3 +112,29 @@ class NotionTask(SQLModel, table=True):
     notion_page_id: str
     sync_status: str  # e.g. "synced" | "failed"
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CorrectionNote(SQLModel, table=True):
+    """
+    Approved correction notes (V2.5, Decision 4). Only ever contains notes
+    that a human has already explicitly approved — see app/correction_notes.py
+    and scripts/propose_correction_notes.py. There is no "proposed but
+    undecided" state stored here; proposals live only transiently (printed
+    output) until a human approves one, at which point a row is inserted
+    directly with active=True.
+
+    `active` is only ever changed by an explicit user action (approve or
+    deactivate) — never automatically, including by the 5-note read-time
+    cap (Design Decisions V2.5, Decision 5) applied in
+    app/correction_notes.py.get_active_notes().
+    """
+
+    __tablename__ = "correction_notes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rule_text: str
+    # Which user_decisions rows this was derived from — JSON, consistent
+    # with UserDecision.changed_fields (Decision 4).
+    source_decision_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    approved_at: datetime = Field(default_factory=datetime.utcnow)
+    active: bool = Field(default=True)

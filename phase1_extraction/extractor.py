@@ -2,12 +2,22 @@
 Claude API Extractor
 
 Calls Claude API with the extraction prompt and returns structured JSON.
+
+Optionally accepts correction_notes (Design Decisions V2.5, Decision 4) —
+a plain list of strings the *caller* fetches from the correction_notes
+table (see app/correction_notes.py) and passes in. This module never
+queries the database itself, so it stays exactly what it's always been: a
+standalone, DB-independent module phase1_extraction/run_experiment.py can
+run with nothing but the Claude API (PHASE1_README.md's Phase 1 isolation
+requirement). When correction_notes is None or empty (the default), the
+call is byte-identical to pre-V2.5 behavior — extraction_prompt.py itself
+is never touched; notes are appended to the already-built user prompt.
 """
 
 import json
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,6 +25,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from anthropic import Anthropic
 from phase1_extraction.extraction_prompt import EXTRACTION_SYSTEM_PROMPT, build_user_prompt
 from phase1_extraction.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+
+NOTES_BLOCK_TEMPLATE = """
+
+Notes from this user's past corrections:
+{notes}
+
+These notes describe how this user has corrected extraction judgment calls before — apply them as guidance where relevant. Return ONLY a valid JSON object with no additional text."""
+
+
+def _append_correction_notes(user_prompt: str, correction_notes: Optional[List[str]]) -> str:
+    """Appends a distinct, clearly-labeled notes block (Decision 4) — never
+    edits extraction_prompt.py's locked base content. Restates the
+    JSON-only instruction at the end so the model's last-seen instruction
+    is still the output-format rule, regardless of prompt wording changes."""
+    if not correction_notes:
+        return user_prompt
+    notes_text = "\n".join(f"- {note}" for note in correction_notes)
+    return user_prompt + NOTES_BLOCK_TEMPLATE.format(notes=notes_text)
 
 
 class ExtractionError(Exception):
@@ -24,19 +52,26 @@ class ExtractionError(Exception):
 
 class Extractor:
     """Wrapper around Claude API for email extraction."""
-    
+
     def __init__(self):
         self.client = Anthropic(api_key=ANTHROPIC_API_KEY)
         self.model = ANTHROPIC_MODEL
-    
-    def extract(self, email_data: Dict[str, str], thread_context: str = "") -> Dict[str, Any]:
+
+    def extract(
+        self,
+        email_data: Dict[str, str],
+        thread_context: str = "",
+        correction_notes: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """
         Extract structured task data from an email.
-        
+
         Args:
             email_data: dict with 'from', 'subject', 'body'
             thread_context: optional recent thread context
-        
+            correction_notes: optional list of approved correction note
+                strings, fetched by the caller (never by this module)
+
         Returns:
             dict with keys: actionable, task, deadline, assignee, reason, confidence
         
@@ -44,7 +79,8 @@ class Extractor:
             ExtractionError: if extraction fails or JSON parsing fails
         """
         user_prompt = build_user_prompt(email_data, thread_context)
-        
+        user_prompt = _append_correction_notes(user_prompt, correction_notes)
+
         try:
             response = self.client.messages.create(
                 model=self.model,
@@ -116,16 +152,21 @@ class Extractor:
             raise ExtractionError(f"Unexpected error during extraction: {e}")
 
 
-def extract_email(email_data: Dict[str, str], thread_context: str = "") -> Dict[str, Any]:
+def extract_email(
+    email_data: Dict[str, str],
+    thread_context: str = "",
+    correction_notes: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Convenience function to extract an email.
-    
+
     Args:
         email_data: dict with 'from', 'subject', 'body'
         thread_context: optional recent thread context
-    
+        correction_notes: optional list of approved correction note strings
+
     Returns:
         dict with extraction result
     """
     extractor = Extractor()
-    return extractor.extract(email_data, thread_context)
+    return extractor.extract(email_data, thread_context, correction_notes)

@@ -23,6 +23,13 @@ sender_trust_signal (app/sender_trust.py), computed alongside triage,
 before extraction, same as V2.2's should_triage_out(). Both are hard
 overrides in compute_policy(), not new triage rules — triage itself
 (app/triage.py) is untouched.
+
+V2.5 (Design Decisions V2.5, Decision 4) fetches any active correction
+notes once per /extract call — they don't vary within a batch — and
+passes the same list into every extractor.extract() call below.
+extractor.py itself never touches the database (Decision 4); this route
+is the caller responsible for that. compute_policy()'s call is completely
+unchanged from V2.4 — correction notes are never passed to it (Decision 2).
 """
 
 from datetime import datetime, timezone as dt_timezone
@@ -31,6 +38,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from app.config import THREAD_CONTEXT_DEPTH
+from app.correction_notes import get_active_notes
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
 from app.models import Email, TaskCandidate, User
@@ -85,6 +93,8 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
         .limit(max_emails)
     ).all()
 
+    active_notes = get_active_notes(session)  # read-time-only, capped at 5 (V2.5 Decision 5)
+
     extractor = Extractor()
     candidates_created = 0
     not_actionable = 0
@@ -110,7 +120,7 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
         }
 
         try:
-            result = extractor.extract(email_data, thread_context)
+            result = extractor.extract(email_data, thread_context, correction_notes=active_notes)
         except ExtractionError as e:
             print(f"[extract] email {email.id} ({email.subject!r}) failed: {e}")
             failed += 1
