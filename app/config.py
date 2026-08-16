@@ -39,3 +39,21 @@ NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 # CONFIDENCE_THRESHOLD.
 TRIAGE_BLOCKED_DOMAINS: list[str] = []
 ACTION_KEYWORDS = ["please", "review", "due", "deadline", "assign"]
+
+# Trust/risk policy (V2.3) — shadow mode only (Design Decisions V2.3,
+# Decision 5). app/policy.py computes and app/routes_extract.py stores a
+# policy_decision on every candidate, but nothing currently reads
+# AUTO_ACT_ENABLED to branch on it — the real auto-create/undo mechanism
+# (Decision 3) is deferred until this flag's flip is separately approved,
+# and not before V2.4 (injection-defense boundary) exists.
+#
+# DO NOT set this to True. Doing so has no effect yet (no code path
+# checks it), but flipping it is explicitly reserved for a distinct,
+# separately-approved decision per Decision 5 — not something to change
+# while touching this file for an unrelated reason.
+AUTO_ACT_ENABLED = False
+
+# Separate, higher bar than CONFIDENCE_THRESHOLD (which only gates review-UI
+# *visibility*, not action). Starting value per Decision 2; tunable only
+# after shadow-mode evaluation (Decision 6).
+AUTO_CONFIDENCE_THRESHOLD = 0.95

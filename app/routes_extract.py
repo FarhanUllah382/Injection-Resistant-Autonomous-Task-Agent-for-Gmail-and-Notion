@@ -10,6 +10,12 @@ Ahead of extraction, each email passes through Triage (app/triage.py) —
 a deterministic pre-filter, no LLM call (Design Decisions V2.2). Only
 obviously non-actionable emails are skipped; extraction_prompt.py and
 extractor.py are otherwise reached exactly as in V2.1, unchanged.
+
+Each actionable candidate also gets a shadow-mode policy_decision (Design
+Decisions V2.3, Decisions 1-2 & 4) via app/policy.py — computed and
+stored for later reporting, but never acted on: AUTO_ACT_ENABLED is False
+(app/config.py), so `status` is always "pending" here, exactly as before
+V2.3. See app/policy.py's docstring for why.
 """
 
 from datetime import datetime, timezone as dt_timezone
@@ -21,6 +27,7 @@ from app.config import THREAD_CONTEXT_DEPTH
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
 from app.models import Email, TaskCandidate, User
+from app.policy import compute_policy
 from app.triage import should_triage_out
 from phase1_extraction.extractor import Extractor, ExtractionError
 
@@ -104,6 +111,10 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
 
         if result["actionable"]:
             candidates_created += 1
+            resolved_due_date = resolve_deadline_phrase(
+                result["deadline"], email.received_at, user.timezone
+            )
+            deadline_resolved = resolved_due_date is not None
             candidate = TaskCandidate(
                 email_id=email.id,
                 claude_task=result["task"],
@@ -111,10 +122,14 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
                 claude_assignee=result["assignee"],
                 claude_reason=result["reason"],
                 claude_confidence=result["confidence"],
-                resolved_due_date=resolve_deadline_phrase(
-                    result["deadline"], email.received_at, user.timezone
+                resolved_due_date=resolved_due_date,
+                policy_decision=compute_policy(
+                    confidence=result["confidence"],
+                    deadline_resolved=deadline_resolved,
+                    assignee=result["assignee"],
                 ),
-                status="pending",
+                deadline_resolved=deadline_resolved,
+                status="pending",  # shadow mode only — see module docstring
             )
             session.add(candidate)
         else:

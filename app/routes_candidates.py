@@ -59,6 +59,8 @@ def _serialize(candidate: TaskCandidate, email: Email) -> dict:
         "confidence": candidate.claude_confidence,
         "reason": candidate.claude_reason,
         "created_at": candidate.created_at,
+        # Shadow-mode only (V2.3) — informational, nothing acts on this yet.
+        "policy_decision": candidate.policy_decision,
         "email": {
             "subject": email.subject,
             "from_address": email.from_address,

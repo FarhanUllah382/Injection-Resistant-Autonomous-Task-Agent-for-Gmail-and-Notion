@@ -80,6 +80,15 @@ class TaskCandidate(SQLModel, table=True):
     # Never set by Claude. Null if it can't be safely resolved.
     resolved_due_date: Optional[date] = None
 
+    # Trust/risk policy output (V2.3, Decisions 2 & 4) — computed once at
+    # candidate creation (app/routes_extract.py) via app/policy.py, stored
+    # here so shadow-mode reporting is a simple query. Shadow mode only:
+    # nothing currently branches on this value, and `status` never becomes
+    # anything other than what V1 already produces (see AUTO_ACT_ENABLED
+    # in app/config.py).
+    policy_decision: Optional[str] = None  # "auto_eligible" | "review_required"
+    deadline_resolved: Optional[bool] = None
+
     status: str = Field(default="pending")  # pending | edited | approved | dismissed
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
