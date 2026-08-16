@@ -16,6 +16,13 @@ Decisions V2.3, Decisions 1-2 & 4) via app/policy.py — computed and
 stored for later reporting, but never acted on: AUTO_ACT_ENABLED is False
 (app/config.py), so `status` is always "pending" here, exactly as before
 V2.3. See app/policy.py's docstring for why.
+
+V2.4 adds two more inputs to that same policy call: `injection_suspected`
+(from extraction_prompt.py's output — see app/policy.py) and
+sender_trust_signal (app/sender_trust.py), computed alongside triage,
+before extraction, same as V2.2's should_triage_out(). Both are hard
+overrides in compute_policy(), not new triage rules — triage itself
+(app/triage.py) is untouched.
 """
 
 from datetime import datetime, timezone as dt_timezone
@@ -28,6 +35,7 @@ from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
 from app.models import Email, TaskCandidate, User
 from app.policy import compute_policy
+from app.sender_trust import sender_trust_signal
 from app.triage import should_triage_out
 from phase1_extraction.extractor import Extractor, ExtractionError
 
@@ -92,6 +100,8 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
             session.commit()
             continue
 
+        sender_trust = sender_trust_signal(email)
+
         thread_context = _build_thread_context(session, email)
         email_data = {
             "from": email.from_address,
@@ -115,6 +125,11 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
                 result["deadline"], email.received_at, user.timezone
             )
             deadline_resolved = resolved_due_date is not None
+            # Fail closed on a missing field, unlike triage's fail-open:
+            # this is a hard-override safety input (app/policy.py), so if
+            # the model ever omits it, treat the email as suspect rather
+            # than silently trusting it.
+            injection_suspected = result.get("injection_suspected", True)
             candidate = TaskCandidate(
                 email_id=email.id,
                 claude_task=result["task"],
@@ -127,6 +142,8 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
                     confidence=result["confidence"],
                     deadline_resolved=deadline_resolved,
                     assignee=result["assignee"],
+                    injection_suspected=injection_suspected,
+                    sender_trust_signal=sender_trust,
                 ),
                 deadline_resolved=deadline_resolved,
                 status="pending",  # shadow mode only — see module docstring

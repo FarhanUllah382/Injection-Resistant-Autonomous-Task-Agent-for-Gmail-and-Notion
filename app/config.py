@@ -57,3 +57,10 @@ AUTO_ACT_ENABLED = False
 # *visibility*, not action). Starting value per Decision 2; tunable only
 # after shadow-mode evaluation (Decision 6).
 AUTO_CONFIDENCE_THRESHOLD = 0.95
+
+# Sender-trust signal (V2.4, Decision 3) — deterministic, header-only check
+# alongside triage, feeding compute_policy() as a hard override (Decision
+# 4). Empty by default: matches the same conservative-default convention
+# as TRIAGE_BLOCKED_DOMAINS — no sender is pre-trusted until the user
+# explicitly configures one. User-editable.
+KNOWN_CONTACT_DOMAINS: list[str] = []
