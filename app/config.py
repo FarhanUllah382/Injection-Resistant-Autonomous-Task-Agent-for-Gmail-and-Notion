@@ -27,3 +27,7 @@ GOOGLE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 # Single MVP test user. V1 processes one person's inbox (see CLAUDE.md); the
 # user's IANA timezone must be explicit, never defaulted to UTC (Decision 5).
 USER_TIMEZONE = os.getenv("USER_TIMEZONE")
+
+# Notion (Phase 4)
+NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")

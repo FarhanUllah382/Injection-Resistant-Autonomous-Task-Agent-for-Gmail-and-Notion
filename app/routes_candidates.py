@@ -18,7 +18,8 @@ from sqlmodel import Session, and_, or_, select
 from app.config import CONFIDENCE_THRESHOLD
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
-from app.models import Email, TaskCandidate, User, UserDecision
+from app.models import Email, NotionTask, TaskCandidate, User, UserDecision
+from app.notion_client import NotionSyncError, create_task_page
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -163,17 +164,35 @@ def approve_candidate(candidate_id: int, session: Session = Depends(get_session)
     if candidate.status == "dismissed":
         raise HTTPException(409, "Candidate was dismissed — cannot approve")
 
+    task = candidate.final_task if candidate.final_task is not None else candidate.claude_task
+    assignee = candidate.final_assignee if candidate.final_assignee is not None else candidate.claude_assignee
     deadline_phrase = (
         candidate.final_deadline_phrase
         if candidate.final_deadline_phrase is not None
         else candidate.claude_deadline_phrase
     )
-    candidate.resolved_due_date = resolve_deadline_phrase(deadline_phrase, email.received_at, user.timezone)
+    resolved_due_date = resolve_deadline_phrase(deadline_phrase, email.received_at, user.timezone)
+
+    # Create the Notion page before touching candidate state — if this fails,
+    # nothing changes and the user can just click Approve again.
+    try:
+        notion_page_id = create_task_page(
+            task=task,
+            resolved_due_date=resolved_due_date,
+            assignee=assignee,
+            reason=candidate.claude_reason,
+            gmail_link=_gmail_link(email.message_id),
+        )
+    except NotionSyncError as e:
+        raise HTTPException(502, f"Failed to create Notion task: {e}") from e
+
+    candidate.resolved_due_date = resolved_due_date
     candidate.status = "approved"
     session.add(candidate)
     session.add(
         UserDecision(candidate_id=candidate.id, user_id=user.id, action="approved", changed_fields=None)
     )
+    session.add(NotionTask(candidate_id=candidate.id, notion_page_id=notion_page_id, sync_status="synced"))
     session.commit()
     session.refresh(candidate)
 

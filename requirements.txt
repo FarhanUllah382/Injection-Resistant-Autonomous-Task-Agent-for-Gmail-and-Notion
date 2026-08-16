@@ -10,3 +10,6 @@ google-auth>=2.35.0
 google-auth-oauthlib>=1.2.1
 google-api-python-client>=2.149.0
 beautifulsoup4>=4.12.3
+
+# Phase 4: Notion — official SDK for the single page-create call on approve
+notion-client>=2.2.1
