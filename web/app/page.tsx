@@ -20,6 +20,10 @@ type Candidate = {
   resolved_meeting_time: string | null;
   calendar_status: "free" | "conflict" | "unavailable" | null;
   suggested_meeting_slots: string[] | null;
+  // V2.6 scheduling correction: which source resolved_meeting_time came
+  // from — an explicit meeting proposal, or a time-bearing deadline when
+  // no meeting was proposed. Meeting stays primary when both exist.
+  scheduling_source: "meeting" | "deadline" | null;
   calendar_booked: boolean;
   email: {
     subject: string;
@@ -316,7 +320,8 @@ export default function ReviewPage() {
                       }}
                     >
                       <div>
-                        Proposed meeting: {c.proposed_meeting_phrase}
+                        {c.scheduling_source === "deadline" ? "Deadline commitment: " : "Proposed meeting: "}
+                        {c.proposed_meeting_phrase}
                         {c.resolved_meeting_time
                           ? ` (${new Date(c.resolved_meeting_time).toLocaleString()})`
                           : " (not resolved)"}
@@ -327,10 +332,13 @@ export default function ReviewPage() {
                       {c.calendar_status === "free" && <div>This time is free on your calendar.</div>}
                       {c.calendar_status === "conflict" && (
                         <div style={{ marginTop: 4 }}>
-                          Conflict at the proposed time.
+                          {c.scheduling_source === "deadline"
+                            ? "You have something else on around this deadline."
+                            : "Conflict at the proposed time."}
                           {c.suggested_meeting_slots && c.suggested_meeting_slots.length > 0 ? (
                             <>
-                              {" "}Alternatives:{" "}
+                              {" "}
+                              {c.scheduling_source === "deadline" ? "Free time nearby:" : "Alternatives:"}{" "}
                               <select
                                 value={selectedSlot[c.id] || c.suggested_meeting_slots[0]}
                                 onChange={(e) =>

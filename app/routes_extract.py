@@ -41,9 +41,20 @@ nowhere else). If the account hasn't granted Calendar scope, or the check
 fails for any other reason, calendar_status is set to "unavailable" and
 extraction/candidate-creation proceeds exactly as before (Decision 2) —
 never raised as an ExtractionError.
+
+V2.6 scheduling correction: a time-bearing deadline (e.g. "5 PM this
+Friday") is also a scheduling input, not just an explicit meeting
+proposal — see _resolve_scheduling_input() below. `proposed_meeting_time`
+stays strictly primary; the deadline is only tried as a fallback when no
+meeting was proposed. `deadline_resolved`/`resolved_due_date` themselves
+are computed exactly as before via app/deadline_resolver.py (now fixed to
+correctly resolve time-bearing phrases to a date — see that module) —
+nothing about compute_policy()'s inputs or app/policy.py's rules changes
+here beyond that resolver bug fix flowing through as intended.
 """
 
 from datetime import datetime, timezone as dt_timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
@@ -61,6 +72,28 @@ from app.triage import should_triage_out
 from phase1_extraction.extractor import Extractor, ExtractionError
 
 router = APIRouter(tags=["extract"])
+
+
+def _resolve_scheduling_input(
+    result: dict, received_at: datetime, user_timezone: str
+) -> tuple[Optional[str], Optional[str], Optional[datetime]]:
+    """Returns (scheduling_source, phrase, resolved_time). Meeting stays
+    strictly primary — the deadline is only tried when no meeting was
+    proposed, or the meeting phrase didn't resolve. Both use the exact
+    same resolver (app/meeting_time_resolver.py), unchanged; a bare-date
+    deadline with no clock time (the common case) correctly yields
+    nothing here, same as before this change."""
+    proposed_meeting_phrase = result.get("proposed_meeting_time")
+    resolved_meeting_time = resolve_meeting_time_phrase(proposed_meeting_phrase, received_at, user_timezone)
+    if resolved_meeting_time is not None:
+        return "meeting", proposed_meeting_phrase, resolved_meeting_time
+
+    deadline_phrase = result.get("deadline")
+    resolved_deadline_time = resolve_meeting_time_phrase(deadline_phrase, received_at, user_timezone)
+    if resolved_deadline_time is not None:
+        return "deadline", deadline_phrase, resolved_deadline_time
+
+    return None, None, None
 
 
 async def _run_scheduling_agent(
@@ -169,9 +202,8 @@ async def extract(max_emails: int = 20, session: Session = Depends(get_session))
             # the model ever omits it, treat the email as suspect rather
             # than silently trusting it.
             injection_suspected = result.get("injection_suspected", True)
-            proposed_meeting_phrase = result.get("proposed_meeting_time")
-            resolved_meeting_time = resolve_meeting_time_phrase(
-                proposed_meeting_phrase, email.received_at, user.timezone
+            scheduling_source, scheduling_phrase, scheduling_time = _resolve_scheduling_input(
+                result, email.received_at, user.timezone
             )
             candidate = TaskCandidate(
                 email_id=email.id,
@@ -189,25 +221,28 @@ async def extract(max_emails: int = 20, session: Session = Depends(get_session))
                     sender_trust_signal=sender_trust,
                 ),
                 deadline_resolved=deadline_resolved,
-                proposed_meeting_phrase=proposed_meeting_phrase,
-                resolved_meeting_time=resolved_meeting_time,
+                proposed_meeting_phrase=scheduling_phrase,
+                resolved_meeting_time=scheduling_time,
+                scheduling_source=scheduling_source,
                 status="pending",  # shadow mode only — see module docstring
             )
             session.add(candidate)
             session.commit()
             session.refresh(candidate)
 
-            # Scheduling Agent (V2.6 Decision 4) — read-only calendar check,
-            # only when a meeting time was actually resolved. Runs
+            # Scheduling Agent (V2.6 Decision 4, corrected) — read-only
+            # calendar check, whenever a scheduling-relevant time was
+            # resolved from either an explicit meeting proposal or a
+            # time-bearing deadline (_resolve_scheduling_input above). Runs
             # regardless of policy_decision/injection_suspected/sender_trust
             # (Decision 6 — those don't gate candidate creation today, so
             # there's nothing new to filter on here).
-            if resolved_meeting_time is not None:
+            if scheduling_time is not None:
                 if account is None:
                     candidate.calendar_status = "unavailable"
                 else:
                     candidate.calendar_status, candidate.suggested_meeting_slots = (
-                        await _run_scheduling_agent(account, resolved_meeting_time)
+                        await _run_scheduling_agent(account, scheduling_time)
                     )
                 session.add(candidate)
                 session.commit()

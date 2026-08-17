@@ -71,6 +71,9 @@ def _serialize(candidate: TaskCandidate, email: Email, session: Session) -> dict
         "resolved_meeting_time": candidate.resolved_meeting_time,
         "calendar_status": candidate.calendar_status,
         "suggested_meeting_slots": candidate.suggested_meeting_slots,
+        # "meeting" | "deadline" | null — which source the two fields above
+        # came from (V2.6 scheduling correction), for accurate UI labeling.
+        "scheduling_source": candidate.scheduling_source,
         "calendar_booked": booking is not None,
         "email": {
             "subject": email.subject,

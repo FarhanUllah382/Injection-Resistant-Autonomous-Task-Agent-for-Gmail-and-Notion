@@ -102,6 +102,13 @@ class TaskCandidate(SQLModel, table=True):
     resolved_meeting_time: Optional[datetime] = None
     calendar_status: Optional[str] = None  # "free" | "conflict" | "unavailable" | None
     suggested_meeting_slots: Optional[list] = Field(default=None, sa_column=Column(JSON))
+    # V2.6 scheduling correction: proposed_meeting_phrase/resolved_meeting_time
+    # above are now populated from EITHER an explicit meeting proposal OR a
+    # time-bearing deadline (e.g. "5 PM this Friday") when no meeting was
+    # proposed — meeting stays strictly primary when both are present. This
+    # field records which one actually produced the value, purely for
+    # accurate UI labeling — it changes no resolution or policy behavior.
+    scheduling_source: Optional[str] = None  # "meeting" | "deadline" | None
 
     status: str = Field(default="pending")  # pending | edited | approved | dismissed
     created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -11,6 +11,9 @@ V2.6 Decision 8 evaluation.
    directly too).
 4. V2.4 adversarial set regression (reuses
    phase1_extraction/run_adversarial_eval.py unchanged).
+5. Scheduling correction (deadline-as-scheduling-input): regression-locks
+   the isolated deadline_resolver.py fix, and checks
+   _resolve_scheduling_input()'s meeting-stays-primary priority rule.
 """
 
 import json
@@ -24,6 +27,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from phase1_extraction.extractor import extract_email
+from app.deadline_resolver import resolve_deadline_phrase
+from app.routes_extract import _resolve_scheduling_input
 from app.scheduling import _find_alternative_slots, _overlaps
 
 SCHEDULING_SET_PATH = Path(__file__).parent / "scheduling_test_emails.jsonl"
@@ -108,11 +113,88 @@ def calendar_check_correctness():
     return all_pass
 
 
+def deadline_resolution_fix_check():
+    """Regression-locks the isolated app/deadline_resolver.py fix: known
+    time-bearing phrases must now resolve (previously None); every
+    previously-working bare-date phrase must resolve to exactly the same
+    date as before (zero behavior change for anything that already
+    worked)."""
+    print("=" * 70)
+    print("SCHEDULING CORRECTION CHECK 1: deadline_resolver.py fix")
+    print("=" * 70)
+    received_at = datetime(2026, 8, 17, 8, 0, tzinfo=timezone.utc)  # a Monday
+    tz = "Asia/Karachi"
+
+    now_resolves = [
+        ("5 PM this Friday", "2026-08-21"),
+        ("3pm on Thursday", "2026-08-20"),
+        ("Monday 9am", "2026-08-17"),
+        ("end of day Friday", "2026-08-21"),
+    ]
+    unchanged = [
+        ("Friday", "2026-08-21"),
+        ("end of week", "2026-08-21"),
+        ("Sept 1st", "2026-09-01"),
+        ("today", "2026-08-17"),
+        ("tomorrow", "2026-08-18"),
+        ("EOD", "2026-08-17"),
+        ("in 3 days", "2026-08-20"),
+    ]
+
+    all_pass = True
+    for phrase, expected in now_resolves + unchanged:
+        resolved = resolve_deadline_phrase(phrase, received_at, tz)
+        ok = resolved is not None and resolved.isoformat() == expected
+        print(f"  {phrase!r:25} -> {resolved} (expected {expected}) {'PASS' if ok else 'FAIL'}")
+        all_pass = all_pass and ok
+
+    print(f"\n  deadline_resolver fix: {'PASS' if all_pass else 'FAIL'}\n")
+    return all_pass
+
+
+def scheduling_priority_check():
+    """_resolve_scheduling_input(): meeting stays strictly primary; deadline
+    is only used as a fallback when no meeting resolved; a bare-date
+    deadline with no clock time correctly yields nothing."""
+    print("=" * 70)
+    print("SCHEDULING CORRECTION CHECK 2: meeting-vs-deadline priority")
+    print("=" * 70)
+    received_at = datetime(2026, 8, 17, 8, 0, tzinfo=timezone.utc)
+    tz = "Asia/Karachi"
+
+    cases = [
+        ("meeting only", {"deadline": None, "proposed_meeting_time": "Thursday at 2pm"}, "meeting"),
+        ("deadline with time only", {"deadline": "5 PM this Friday", "proposed_meeting_time": None}, "deadline"),
+        (
+            "both present -> meeting wins",
+            {"deadline": "5 PM this Friday", "proposed_meeting_time": "Thursday at 2pm"},
+            "meeting",
+        ),
+        ("bare-date deadline, no meeting -> neither", {"deadline": "Friday", "proposed_meeting_time": None}, None),
+        ("neither present", {"deadline": None, "proposed_meeting_time": None}, None),
+    ]
+
+    all_pass = True
+    for label, result, expected_source in cases:
+        source, phrase, resolved = _resolve_scheduling_input(result, received_at, tz)
+        ok = source == expected_source
+        print(f"  {label}: source={source} phrase={phrase!r} resolved={resolved} "
+              f"(expected source={expected_source}) {'PASS' if ok else 'FAIL'}")
+        all_pass = all_pass and ok
+
+    print(f"\n  Priority logic: {'PASS' if all_pass else 'FAIL'}\n")
+    return all_pass
+
+
 if __name__ == "__main__":
     r1 = scheduling_field_check()
     r2 = calendar_check_correctness()
+    r3 = deadline_resolution_fix_check()
+    r4 = scheduling_priority_check()
     print("=" * 70)
     print("SUMMARY")
     print("=" * 70)
     print(f"  scheduling_field_check: {'PASS' if r1 else 'FAIL'}")
     print(f"  calendar_check_correctness: {'PASS' if r2 else 'FAIL'}")
+    print(f"  deadline_resolution_fix_check: {'PASS' if r3 else 'FAIL'}")
+    print(f"  scheduling_priority_check: {'PASS' if r4 else 'FAIL'}")

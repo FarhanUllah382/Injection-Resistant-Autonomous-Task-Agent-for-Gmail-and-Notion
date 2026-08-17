@@ -31,6 +31,15 @@ _RELATIVE_DAYS_RE = re.compile(r"^in\s+(\d+)\s+days?$")
 _RELATIVE_WEEKS_RE = re.compile(r"^in\s+(\d+)\s+weeks?$")
 _MONTH_DAY_RE = re.compile(r"^([a-zA-Z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?$")
 
+# Fallback only — searches for a day reference anywhere in the phrase,
+# rather than requiring the whole string to be just the day (see the
+# fallback branch at the end of resolve_deadline_phrase for why).
+_TODAY_TOMORROW_SEARCH_RE = re.compile(r"\b(today|tomorrow)\b", re.IGNORECASE)
+_WEEKDAY_SEARCH_RE = re.compile(
+    r"\b(?:(next|this)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.IGNORECASE,
+)
+
 
 def _next_weekday(today: date, qualifier: Optional[str], weekday: int) -> date:
     delta = (weekday - today.weekday()) % 7
@@ -90,5 +99,28 @@ def resolve_deadline_phrase(
         if not explicit_year and candidate < today:
             candidate = date(today.year + 1, month, day)
         return candidate
+
+    # Fallback: phrases that pair a specific day with a time of day (e.g.
+    # "5 PM this Friday", "3pm on Thursday", "Monday 9am") don't fullmatch
+    # any branch above, since none of them expect a leading/trailing
+    # clock-time token — they'd otherwise incorrectly resolve to None even
+    # though a specific day is clearly stated. This searches for the day
+    # reference alone and resolves just the date, ignoring any time-of-day
+    # text elsewhere in the phrase — this function stays date-only by
+    # design (V1 Decision 5: "deadline is a phrase, not a resolved date").
+    # The clock-time itself is resolved separately, only when treated as a
+    # scheduling input — see app/meeting_time_resolver.py. Runs last, after
+    # every exact-match branch above, so it only adds coverage for phrases
+    # that would otherwise return None — it never changes an already-
+    # resolved result.
+    match = _TODAY_TOMORROW_SEARCH_RE.search(text)
+    if match:
+        return today if match.group(1).lower() == "today" else today + timedelta(days=1)
+
+    match = _WEEKDAY_SEARCH_RE.search(text)
+    if match:
+        qualifier = match.group(1).lower() if match.group(1) else None
+        weekday = match.group(2).lower()
+        return _next_weekday(today, qualifier, _WEEKDAYS[weekday])
 
     return None
