@@ -10,7 +10,7 @@ booking a calendar event is always this distinct endpoint, always a
 distinct button click in the review UI.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -76,6 +76,26 @@ async def book_calendar(
     else:
         start = datetime.fromisoformat(chosen_slot)
     end = start + timedelta(minutes=MEETING_DURATION_MINUTES)
+
+    # Google Calendar's API rejects event times with no timezone
+    # indicator at all ("Missing time zone definition for start time").
+    # resolved_meeting_time / suggested_meeting_slots are naive by the
+    # time they get here, but the underlying instant they represent is
+    # already UTC — Postgres TIMESTAMP WITHOUT TIME ZONE stores whatever
+    # SQLAlchemy handed it, and every tz-aware datetime built upstream
+    # (app/meeting_time_resolver.py's ZoneInfo(user_timezone) result) gets
+    # converted to UTC before the tzinfo is stripped on write. Labeling
+    # these naive values with the user's *local* timezone instead of UTC
+    # would silently shift the instant by the UTC offset (verified live:
+    # it booked an event 5 hours off for a UTC+5 user before this fix) —
+    # so UTC is attached here, not user.timezone. The slot-matching
+    # comparison above deliberately stays naive-vs-naive (matching what
+    # the frontend received), so this only ever happens right before the
+    # actual API call, never earlier.
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=dt_timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=dt_timezone.utc)
 
     async with calendar_session(account.access_token, account.refresh_token) as mcp:
         result = unwrap(

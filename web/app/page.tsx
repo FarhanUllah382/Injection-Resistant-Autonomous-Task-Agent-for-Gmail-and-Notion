@@ -4,6 +4,21 @@ import { useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// resolved_meeting_time comes back from the API as a naive ISO string
+// (no offset) whose underlying instant is UTC — Postgres TIMESTAMP
+// WITHOUT TIME ZONE strips tzinfo on storage, but every value written
+// there was converted to UTC first (see app/routes_scheduling.py). A bare
+// `new Date("2026-08-21T12:00:00")` would parse that as *browser-local*
+// time instead, silently shifting the displayed hour by the browser's
+// UTC offset — this was the exact bug behind the "11 AM" deadline
+// displaying as "6:00 AM". Appending "Z" tells JS it's UTC, after which
+// toLocaleString() correctly converts to the viewer's local time for
+// display, same as suggested_meeting_slots below (which already carry a
+// real offset and don't need this).
+function formatNaiveUtc(isoString: string): string {
+  return new Date(isoString + "Z").toLocaleString();
+}
+
 type Candidate = {
   id: number;
   status: string;
@@ -323,7 +338,7 @@ export default function ReviewPage() {
                         {c.scheduling_source === "deadline" ? "Deadline commitment: " : "Proposed meeting: "}
                         {c.proposed_meeting_phrase}
                         {c.resolved_meeting_time
-                          ? ` (${new Date(c.resolved_meeting_time).toLocaleString()})`
+                          ? ` (${formatNaiveUtc(c.resolved_meeting_time)})`
                           : " (not resolved)"}
                       </div>
                       {c.calendar_status === "unavailable" && (

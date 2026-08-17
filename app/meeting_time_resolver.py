@@ -28,6 +28,13 @@ _WEEKDAYS = {
     "friday": 4, "saturday": 5, "sunday": 6,
 }
 
+_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+
 _TIME_RE = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
 _NOON_RE = re.compile(r"\bnoon\b", re.IGNORECASE)
 _MIDNIGHT_RE = re.compile(r"\bmidnight\b", re.IGNORECASE)
@@ -36,6 +43,9 @@ _DAY_RE = re.compile(
     r"\b(?:(next|this)\s+)?(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
     re.IGNORECASE,
 )
+_MONTH_DAY_RE = re.compile(
+    r"\b([a-zA-Z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b", re.IGNORECASE
+)
 
 
 def _next_weekday(today: date, qualifier: Optional[str], weekday: int) -> date:
@@ -43,6 +53,28 @@ def _next_weekday(today: date, qualifier: Optional[str], weekday: int) -> date:
     if qualifier == "next":
         delta = delta + 7 if delta != 0 else 7
     return today + timedelta(days=delta)
+
+
+def _extract_month_day(text: str, today: date) -> Optional[date]:
+    """An explicit month+day (e.g. "August 24") is unambiguous and takes
+    priority over a bare weekday name — see _extract_day below for why."""
+    match = _MONTH_DAY_RE.search(text)
+    if not match:
+        return None
+    month_name = match.group(1).lower()
+    if month_name not in _MONTHS:
+        return None
+    month = _MONTHS[month_name]
+    day = int(match.group(2))
+    explicit_year = match.group(3)
+    year = int(explicit_year) if explicit_year else today.year
+    try:
+        candidate = date(year, month, day)
+    except ValueError:
+        return None
+    if not explicit_year and candidate < today:
+        candidate = date(today.year + 1, month, day)
+    return candidate
 
 
 def _extract_time(text: str) -> Optional[time]:
@@ -66,6 +98,14 @@ def _extract_time(text: str) -> Optional[time]:
 
 
 def _extract_day(text: str, today: date) -> Optional[date]:
+    # Explicit month+day wins whenever present — a phrase like "Monday,
+    # August 24" must resolve to August 24, not to "the nearest Monday
+    # from today" (which silently ignores the stated date and can be
+    # wrong by up to a week if today already happens to be a Monday).
+    month_day = _extract_month_day(text, today)
+    if month_day is not None:
+        return month_day
+
     match = _DAY_RE.search(text)
     if not match:
         return None
