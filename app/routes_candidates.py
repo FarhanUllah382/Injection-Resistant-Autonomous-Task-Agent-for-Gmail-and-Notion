@@ -19,7 +19,7 @@ from app.config import CONFIDENCE_THRESHOLD, NOTION_API_KEY, NOTION_DATABASE_ID
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
 from app.mcp_clients import notion_session, unwrap
-from app.models import Email, NotionTask, TaskCandidate, User, UserDecision
+from app.models import CalendarBooking, Email, NotionTask, TaskCandidate, User, UserDecision
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -42,7 +42,10 @@ def _get_candidate(session: Session, candidate_id: int) -> TaskCandidate:
     return candidate
 
 
-def _serialize(candidate: TaskCandidate, email: Email) -> dict:
+def _serialize(candidate: TaskCandidate, email: Email, session: Session) -> dict:
+    booking = session.exec(
+        select(CalendarBooking).where(CalendarBooking.candidate_id == candidate.id)
+    ).first()
     return {
         "id": candidate.id,
         "status": candidate.status,
@@ -61,6 +64,14 @@ def _serialize(candidate: TaskCandidate, email: Email) -> dict:
         "created_at": candidate.created_at,
         # Shadow-mode only (V2.3) — informational, nothing acts on this yet.
         "policy_decision": candidate.policy_decision,
+        # Scheduling Agent output (V2.6) — read-only info for the review UI.
+        # Booking is a separate action (POST /candidates/{id}/book-calendar,
+        # app/routes_scheduling.py), never triggered from here.
+        "proposed_meeting_phrase": candidate.proposed_meeting_phrase,
+        "resolved_meeting_time": candidate.resolved_meeting_time,
+        "calendar_status": candidate.calendar_status,
+        "suggested_meeting_slots": candidate.suggested_meeting_slots,
+        "calendar_booked": booking is not None,
         "email": {
             "subject": email.subject,
             "from_address": email.from_address,
@@ -97,7 +108,7 @@ def list_candidates(status: Optional[str] = None, session: Session = Depends(get
     query = query.order_by(TaskCandidate.claude_confidence.desc())
 
     rows = session.exec(query).all()
-    return [_serialize(candidate, email) for candidate, email in rows]
+    return [_serialize(candidate, email, session) for candidate, email in rows]
 
 
 class CandidateEdit(BaseModel):
@@ -137,7 +148,7 @@ def edit_candidate(candidate_id: int, edit: CandidateEdit, session: Session = De
         candidate.final_assignee = edit.assignee
 
     if not changed_fields:
-        return _serialize(candidate, session.get(Email, candidate.email_id))
+        return _serialize(candidate, session.get(Email, candidate.email_id), session)
 
     candidate.status = "edited"
     session.add(candidate)
@@ -152,7 +163,7 @@ def edit_candidate(candidate_id: int, edit: CandidateEdit, session: Session = De
     session.commit()
     session.refresh(candidate)
 
-    return _serialize(candidate, session.get(Email, candidate.email_id))
+    return _serialize(candidate, session.get(Email, candidate.email_id), session)
 
 
 @router.post("/{candidate_id}/approve")
@@ -207,7 +218,7 @@ async def approve_candidate(candidate_id: int, session: Session = Depends(get_se
     session.commit()
     session.refresh(candidate)
 
-    return _serialize(candidate, email)
+    return _serialize(candidate, email, session)
 
 
 @router.post("/{candidate_id}/dismiss")
@@ -226,4 +237,4 @@ def dismiss_candidate(candidate_id: int, session: Session = Depends(get_session)
     session.commit()
     session.refresh(candidate)
 
-    return _serialize(candidate, session.get(Email, candidate.email_id))
+    return _serialize(candidate, session.get(Email, candidate.email_id), session)

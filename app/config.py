@@ -22,7 +22,16 @@ CONFIDENCE_THRESHOLD = 0.7
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
-GOOGLE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+# Calendar scope added V2.6 Decision 2 — calendar.events (read/write events
+# only, not full calendar settings) rather than the broader `calendar`
+# scope, matching this project's existing "minimum scopes necessary"
+# convention. Existing users must explicitly re-consent to this new scope
+# (Google requires this; there's no way to silently expand access) — see
+# app/scheduling.py for the graceful-degradation path when they haven't.
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+]
 
 # Single MVP test user. V1 processes one person's inbox (see CLAUDE.md); the
 # user's IANA timezone must be explicit, never defaulted to UTC (Decision 5).
@@ -64,3 +73,11 @@ AUTO_CONFIDENCE_THRESHOLD = 0.95
 # as TRIAGE_BLOCKED_DOMAINS — no sender is pre-trusted until the user
 # explicitly configures one. User-editable.
 KNOWN_CONTACT_DOMAINS: list[str] = []
+
+# Scheduling Agent (V2.6, Decision 4) — not specified in the design doc;
+# simple, stated defaults. "Business hours" bound the nearest-free-slot
+# search; meeting duration is used both for the free/busy check window and
+# for events actually created via the explicit approval step (Decision 5).
+BUSINESS_HOURS_START = 9   # 9am, in the user's IANA timezone
+BUSINESS_HOURS_END = 17    # 5pm, in the user's IANA timezone
+MEETING_DURATION_MINUTES = 30

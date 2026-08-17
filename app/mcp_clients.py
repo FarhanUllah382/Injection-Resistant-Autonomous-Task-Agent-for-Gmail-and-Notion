@@ -27,6 +27,7 @@ from mcp.types import CallToolResult
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _GMAIL_SERVER = _REPO_ROOT / "mcp_servers" / "gmail_mcp" / "server.py"
 _NOTION_SERVER = _REPO_ROOT / "mcp_servers" / "notion_mcp" / "server.py"
+_CALENDAR_SERVER = _REPO_ROOT / "mcp_servers" / "calendar_mcp" / "server.py"
 
 
 def _spawn_env(extra: dict) -> dict:
@@ -71,6 +72,27 @@ async def notion_session(api_key: str, database_id: str):
             {
                 "NOTION_API_KEY": api_key,
                 "NOTION_DATABASE_ID": database_id,
+            }
+        ),
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
+
+
+@asynccontextmanager
+async def calendar_session(access_token: str, refresh_token: str):
+    """Same account/token as gmail_session (V2.6 Decision 2 extends the
+    existing OAuth grant rather than a second auth flow) — a separate MCP
+    server process regardless, same isolation as every other server."""
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[str(_CALENDAR_SERVER)],
+        env=_spawn_env(
+            {
+                "CALENDAR_ACCESS_TOKEN": access_token,
+                "CALENDAR_REFRESH_TOKEN": refresh_token or "",
             }
         ),
     )

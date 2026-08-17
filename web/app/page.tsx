@@ -14,6 +14,13 @@ type Candidate = {
   confidence: number;
   reason: string;
   created_at: string;
+  // V2.6 Scheduling Agent — read-only info; booking is its own separate
+  // action (POST /candidates/{id}/book-calendar), never part of Approve.
+  proposed_meeting_phrase: string | null;
+  resolved_meeting_time: string | null;
+  calendar_status: "free" | "conflict" | "unavailable" | null;
+  suggested_meeting_slots: string[] | null;
+  calendar_booked: boolean;
   email: {
     subject: string;
     from_address: string;
@@ -49,6 +56,7 @@ export default function ReviewPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<EditForm>({ task: "", deadline_phrase: "", assignee: "" });
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<Record<number, string>>({});
 
   async function loadCandidates() {
     setLoading(true);
@@ -145,6 +153,24 @@ export default function ReviewPage() {
       await loadCandidates();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to dismiss candidate");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Separate, explicit action from Approve — booking a calendar event is a
+  // distinct commitment from creating a task (V2.6 Decision 5). Never
+  // triggered automatically or bundled into approve().
+  async function bookCalendar(id: number, slot: string) {
+    setBusyId(id);
+    try {
+      await apiCall(`/candidates/${id}/book-calendar`, {
+        method: "POST",
+        body: JSON.stringify({ slot }),
+      });
+      await loadCandidates();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add to calendar");
     } finally {
       setBusyId(null);
     }
@@ -275,6 +301,80 @@ export default function ReviewPage() {
                   <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
                     {c.reason}
                   </p>
+
+                  {/* V2.6 Scheduling Agent — informational only. Booking is
+                      always a separate click below, never part of Approve. */}
+                  {c.proposed_meeting_phrase && (
+                    <div
+                      className="muted"
+                      style={{
+                        fontSize: 13,
+                        marginBottom: 12,
+                        padding: 8,
+                        border: "1px solid var(--border)",
+                        borderRadius: 6,
+                      }}
+                    >
+                      <div>
+                        Proposed meeting: {c.proposed_meeting_phrase}
+                        {c.resolved_meeting_time
+                          ? ` (${new Date(c.resolved_meeting_time).toLocaleString()})`
+                          : " (not resolved)"}
+                      </div>
+                      {c.calendar_status === "unavailable" && (
+                        <div>Calendar not connected — grant calendar access to see availability.</div>
+                      )}
+                      {c.calendar_status === "free" && <div>This time is free on your calendar.</div>}
+                      {c.calendar_status === "conflict" && (
+                        <div style={{ marginTop: 4 }}>
+                          Conflict at the proposed time.
+                          {c.suggested_meeting_slots && c.suggested_meeting_slots.length > 0 ? (
+                            <>
+                              {" "}Alternatives:{" "}
+                              <select
+                                value={selectedSlot[c.id] || c.suggested_meeting_slots[0]}
+                                onChange={(e) =>
+                                  setSelectedSlot({ ...selectedSlot, [c.id]: e.target.value })
+                                }
+                              >
+                                {c.suggested_meeting_slots.map((slot) => (
+                                  <option key={slot} value={slot}>
+                                    {new Date(slot).toLocaleString()}
+                                  </option>
+                                ))}
+                              </select>
+                            </>
+                          ) : (
+                            " No free alternatives found this week."
+                          )}
+                        </div>
+                      )}
+                      {c.calendar_booked ? (
+                        <div style={{ marginTop: 4 }}>Added to calendar.</div>
+                      ) : (
+                        (c.calendar_status === "free" || c.calendar_status === "conflict") && (
+                          <button
+                            style={{ marginTop: 8 }}
+                            disabled={
+                              isBusy ||
+                              (c.calendar_status === "conflict" &&
+                                (!c.suggested_meeting_slots || c.suggested_meeting_slots.length === 0))
+                            }
+                            onClick={() => {
+                              const slot =
+                                c.calendar_status === "conflict"
+                                  ? selectedSlot[c.id] || (c.suggested_meeting_slots || [])[0]
+                                  : c.resolved_meeting_time;
+                              if (slot) bookCalendar(c.id, slot);
+                            }}
+                          >
+                            {isBusy ? "…" : "Also add to calendar"}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  )}
+
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="primary" onClick={() => approve(c.id)} disabled={isBusy}>
                       {isBusy ? "…" : "Approve"}

@@ -1,0 +1,9 @@
+{"id": "sched-1", "from": "colleague@example.com", "subject": "Quick sync", "body": "Can we hop on a call tomorrow at 10am to sync on the launch plan?", "label": {"proposed_meeting_time_present": true}}
+{"id": "sched-2", "from": "colleague@example.com", "subject": "Project review", "body": "Let's meet Thursday at 2pm to go over the project review.", "label": {"proposed_meeting_time_present": true}}
+{"id": "sched-3", "from": "colleague@example.com", "subject": "Design sync", "body": "How about Friday at 3:30pm for the design sync?", "label": {"proposed_meeting_time_present": true}}
+{"id": "sched-4", "from": "colleague@example.com", "subject": "Catch up", "body": "We should connect sometime next week to catch up, no rush on timing.", "label": {"proposed_meeting_time_present": false}}
+{"id": "sched-5", "from": "colleague@example.com", "subject": "Coffee?", "body": "We should grab coffee soon, been a while since we caught up.", "label": {"proposed_meeting_time_present": false}}
+{"id": "sched-6", "from": "colleague@example.com", "subject": "Follow-up chat", "body": "Thursday afternoon works for me if you want to chat about the roadmap.", "label": {"proposed_meeting_time_present": false}}
+{"id": "sched-7", "from": "colleague@example.com", "subject": "PR review", "body": "Can you review my PR by Friday? No meeting needed, just async review.", "label": {"proposed_meeting_time_present": false}}
+{"id": "sched-8", "from": "hr@example.com", "subject": "Policy update", "body": "FYI, we updated the office attendance policy effective next month.", "label": {"proposed_meeting_time_present": false}}
+{"id": "sched-9", "from": "colleague@example.com", "subject": "Report needed", "body": "Could you send over the Q3 report by end of week?", "label": {"proposed_meeting_time_present": false}}

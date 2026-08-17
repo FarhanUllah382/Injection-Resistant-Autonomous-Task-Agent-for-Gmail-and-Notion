@@ -89,6 +89,20 @@ class TaskCandidate(SQLModel, table=True):
     policy_decision: Optional[str] = None  # "auto_eligible" | "review_required"
     deadline_resolved: Optional[bool] = None
 
+    # Scheduling Agent output (V2.6, Decisions 3-4). claude_* immutable once
+    # written, same convention as the task/deadline/assignee fields above.
+    # resolved_meeting_time is app-computed by app/meeting_time_resolver.py
+    # (never by Claude), null if the phrase couldn't be safely resolved.
+    # calendar_status / suggested_meeting_slots are computed once at
+    # candidate creation by app/scheduling.py — "unavailable" means the
+    # connected account hasn't granted Calendar scope yet (Decision 2),
+    # not an error. None of this ever books anything — see
+    # app/routes_scheduling.py for the only code path that can.
+    proposed_meeting_phrase: Optional[str] = None
+    resolved_meeting_time: Optional[datetime] = None
+    calendar_status: Optional[str] = None  # "free" | "conflict" | "unavailable" | None
+    suggested_meeting_slots: Optional[list] = Field(default=None, sa_column=Column(JSON))
+
     status: str = Field(default="pending")  # pending | edited | approved | dismissed
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -138,3 +152,19 @@ class CorrectionNote(SQLModel, table=True):
     source_decision_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
     approved_at: datetime = Field(default_factory=datetime.utcnow)
     active: bool = Field(default=True)
+
+
+class CalendarBooking(SQLModel, table=True):
+    """
+    Records a real calendar event created via the explicit, separate
+    approval action (V2.6, Decision 5) — same role NotionTask plays for
+    Notion pages. A row here only ever exists because a human clicked
+    "Also add to calendar"; nothing else in this codebase writes one.
+    """
+
+    __tablename__ = "calendar_bookings"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    candidate_id: int = Field(foreign_key="task_candidates.id", unique=True)
+    calendar_event_id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)

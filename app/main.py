@@ -13,6 +13,7 @@ from app.routes_auth import router as auth_router
 from app.routes_candidates import router as candidates_router
 from app.routes_extract import router as extract_router
 from app.routes_scan import router as scan_router
+from app.routes_scheduling import router as scheduling_router
 
 app = FastAPI(title="Inbox-to-Action")
 
@@ -29,6 +30,7 @@ app.include_router(auth_router)
 app.include_router(scan_router)
 app.include_router(extract_router)
 app.include_router(candidates_router)
+app.include_router(scheduling_router)
 
 
 @app.on_event("startup")

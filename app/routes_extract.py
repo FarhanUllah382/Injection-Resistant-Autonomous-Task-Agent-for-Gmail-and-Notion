@@ -30,6 +30,17 @@ passes the same list into every extractor.extract() call below.
 extractor.py itself never touches the database (Decision 4); this route
 is the caller responsible for that. compute_policy()'s call is completely
 unchanged from V2.4 — correction notes are never passed to it (Decision 2).
+
+V2.6 (Design Decisions V2.6, Decisions 3-4) resolves a candidate's
+`proposed_meeting_time` (app/meeting_time_resolver.py) and, if resolved,
+runs the Scheduling Agent (app/scheduling.py) once at creation time —
+same "compute once, store, display later" convention as policy_decision
+(V2.3). This is a read-only calendar check; nothing here ever books
+anything (Decision 5 — that's app/routes_scheduling.py's job, and
+nowhere else). If the account hasn't granted Calendar scope, or the check
+fails for any other reason, calendar_status is set to "unavailable" and
+extraction/candidate-creation proceeds exactly as before (Decision 2) —
+never raised as an ExtractionError.
 """
 
 from datetime import datetime, timezone as dt_timezone
@@ -41,13 +52,29 @@ from app.config import THREAD_CONTEXT_DEPTH
 from app.correction_notes import get_active_notes
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
-from app.models import Email, TaskCandidate, User
+from app.meeting_time_resolver import resolve_meeting_time_phrase
+from app.models import Email, EmailAccount, TaskCandidate, User
 from app.policy import compute_policy
+from app.scheduling import check_availability
 from app.sender_trust import sender_trust_signal
 from app.triage import should_triage_out
 from phase1_extraction.extractor import Extractor, ExtractionError
 
 router = APIRouter(tags=["extract"])
+
+
+async def _run_scheduling_agent(
+    account: EmailAccount, proposed_start: datetime
+) -> tuple[str, list]:
+    """Returns (calendar_status, suggested_slots). Never raises — any
+    failure (missing scope, MCP error, etc.) degrades to "unavailable"
+    rather than breaking /extract (V2.6 Decision 2)."""
+    try:
+        result = await check_availability(account.access_token, account.refresh_token, proposed_start)
+        return result.status, [slot.isoformat() for slot in result.suggested_slots]
+    except Exception as e:  # noqa: BLE001 — deliberately broad, see docstring
+        print(f"[extract] calendar check failed, degrading to unavailable: {e}")
+        return "unavailable", []
 
 
 def _build_thread_context(session: Session, email: Email) -> str:
@@ -75,7 +102,7 @@ def _build_thread_context(session: Session, email: Email) -> str:
 
 
 @router.post("/extract")
-def extract(max_emails: int = 20, session: Session = Depends(get_session)):
+async def extract(max_emails: int = 20, session: Session = Depends(get_session)):
     user = session.exec(select(User)).first()
     if user is None:
         return {
@@ -85,6 +112,8 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
             "triaged_out": 0,
             "failed": 0,
         }
+
+    account = session.exec(select(EmailAccount).where(EmailAccount.user_id == user.id)).first()
 
     pending = session.exec(
         select(Email)
@@ -140,6 +169,10 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
             # the model ever omits it, treat the email as suspect rather
             # than silently trusting it.
             injection_suspected = result.get("injection_suspected", True)
+            proposed_meeting_phrase = result.get("proposed_meeting_time")
+            resolved_meeting_time = resolve_meeting_time_phrase(
+                proposed_meeting_phrase, email.received_at, user.timezone
+            )
             candidate = TaskCandidate(
                 email_id=email.id,
                 claude_task=result["task"],
@@ -156,9 +189,28 @@ def extract(max_emails: int = 20, session: Session = Depends(get_session)):
                     sender_trust_signal=sender_trust,
                 ),
                 deadline_resolved=deadline_resolved,
+                proposed_meeting_phrase=proposed_meeting_phrase,
+                resolved_meeting_time=resolved_meeting_time,
                 status="pending",  # shadow mode only — see module docstring
             )
             session.add(candidate)
+            session.commit()
+            session.refresh(candidate)
+
+            # Scheduling Agent (V2.6 Decision 4) — read-only calendar check,
+            # only when a meeting time was actually resolved. Runs
+            # regardless of policy_decision/injection_suspected/sender_trust
+            # (Decision 6 — those don't gate candidate creation today, so
+            # there's nothing new to filter on here).
+            if resolved_meeting_time is not None:
+                if account is None:
+                    candidate.calendar_status = "unavailable"
+                else:
+                    candidate.calendar_status, candidate.suggested_meeting_slots = (
+                        await _run_scheduling_agent(account, resolved_meeting_time)
+                    )
+                session.add(candidate)
+                session.commit()
         else:
             not_actionable += 1
 
