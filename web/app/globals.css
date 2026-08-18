@@ -7,6 +7,53 @@
   --accent: #2563eb;
   --danger: #dc2626;
   --success: #16a34a;
+
+  /* V2.7 design system (Design Decisions V2.7, Decision 6) — additive to
+     the tokens above, nothing removed so existing button/input primitives
+     keep working unchanged. */
+
+  /* Semantic status palette. This is the ONLY place these colors are
+     defined — components reference the variables, never a raw hex value,
+     so the mapping stays identical across the card list, dashboard strip,
+     and toasts (Decision 6's "never redefined per-component"). See
+     web/lib/candidateStatus.ts for the status -> token mapping. */
+  --status-pending-bg: #fef3c7;
+  --status-pending-fg: #92400e;
+  --status-approved-bg: #dcfce7;
+  --status-approved-fg: #166534;
+  --status-flagged-bg: #fee2e2;
+  --status-flagged-fg: #991b1b;
+  --status-dismissed-bg: #f1f5f9;
+  --status-dismissed-fg: #475569;
+  --status-scheduled-bg: #dbeafe;
+  --status-scheduled-fg: #1e40af;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Radius scale */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.10);
+
+  /* Type scale — hierarchy via size/weight on the existing system-font
+     stack, not a webfont swap (kept deliberately dependency-free). */
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 15px;
+  --font-size-lg: 17px;
+  --font-size-xl: 21px;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,6 +66,20 @@
     --accent: #60a5fa;
     --danger: #f87171;
     --success: #4ade80;
+
+    --status-pending-bg: #3f2d0a;
+    --status-pending-fg: #fbbf24;
+    --status-approved-bg: #0f2e1a;
+    --status-approved-fg: #4ade80;
+    --status-flagged-bg: #3b0d0d;
+    --status-flagged-fg: #f87171;
+    --status-dismissed-bg: #1e293b;
+    --status-dismissed-fg: #94a3b8;
+    --status-scheduled-bg: #0f2547;
+    --status-scheduled-fg: #60a5fa;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -39,6 +100,8 @@ body {
   color: var(--foreground);
   background: var(--background);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: var(--font-size-base);
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

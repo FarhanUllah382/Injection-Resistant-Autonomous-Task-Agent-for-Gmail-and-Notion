@@ -1,0 +1,108 @@
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.card.selected {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+/* Decision 7 item 3: a flagged candidate must be visually distinct — a
+   left accent bar in the flagged status color, independent of (and in
+   addition to) the StatusBadge, so it reads at a glance in a scrolled
+   list even before the badge text registers. */
+.card.flagged {
+  border-left: 4px solid var(--status-flagged-fg);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sender {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gmailLink {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.task {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-2);
+}
+
+.meta {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+}
+
+.reason {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  margin-bottom: var(--space-3);
+}
+
+.schedulingBox {
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--status-scheduled-fg);
+  background: var(--status-scheduled-bg);
+  color: var(--status-scheduled-fg);
+  border-radius: var(--radius-sm);
+}
+
+.schedulingNote {
+  margin-top: var(--space-1);
+}
+
+/* "Also add to calendar" — kept visually and structurally separate from
+   Approve/Dismiss (Decision 7 item 2): its own row inside the scheduling
+   box, never merged into .actions, never a checkbox, never pre-checked. */
+.calendarAction {
+  margin-top: var(--space-2);
+}
+
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.editButtons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}

@@ -1,65 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiCall, type Candidate, type EditForm } from "@/lib/api";
+import { useEventSource, type LiveEvent } from "./hooks/useEventSource";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import DashboardSummary from "./components/DashboardSummary";
+import CandidateList from "./components/CandidateList";
+import Toast, { type ToastItem } from "./components/Toast";
+import styles from "./page.module.css";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// V2.7 (Design Decisions V2.7): Gmail is now scanned+extracted
+// automatically every ~2 minutes by app/scheduler.py — the manual
+// Scan/Extract buttons below stay for on-demand use (e.g. "I know a new
+// email just arrived, don't make me wait"), they no longer are the only
+// way candidates appear. New candidates arrive via the SSE toast/badge
+// below (useEventSource -> GET /events) without a page reload.
 
-// resolved_meeting_time comes back from the API as a naive ISO string
-// (no offset) whose underlying instant is UTC — Postgres TIMESTAMP
-// WITHOUT TIME ZONE strips tzinfo on storage, but every value written
-// there was converted to UTC first (see app/routes_scheduling.py). A bare
-// `new Date("2026-08-21T12:00:00")` would parse that as *browser-local*
-// time instead, silently shifting the displayed hour by the browser's
-// UTC offset — this was the exact bug behind the "11 AM" deadline
-// displaying as "6:00 AM". Appending "Z" tells JS it's UTC, after which
-// toLocaleString() correctly converts to the viewer's local time for
-// display, same as suggested_meeting_slots below (which already carry a
-// real offset and don't need this).
-function formatNaiveUtc(isoString: string): string {
-  return new Date(isoString + "Z").toLocaleString();
-}
-
-type Candidate = {
-  id: number;
-  status: string;
-  task: string | null;
-  deadline_phrase: string | null;
-  resolved_due_date: string | null;
-  assignee: string | null;
-  confidence: number;
-  reason: string;
-  created_at: string;
-  // V2.6 Scheduling Agent — read-only info; booking is its own separate
-  // action (POST /candidates/{id}/book-calendar), never part of Approve.
-  proposed_meeting_phrase: string | null;
-  resolved_meeting_time: string | null;
-  calendar_status: "free" | "conflict" | "unavailable" | null;
-  suggested_meeting_slots: string[] | null;
-  // V2.6 scheduling correction: which source resolved_meeting_time came
-  // from — an explicit meeting proposal, or a time-bearing deadline when
-  // no meeting was proposed. Meeting stays primary when both exist.
-  scheduling_source: "meeting" | "deadline" | null;
-  calendar_booked: boolean;
-  email: {
-    subject: string;
-    from_address: string;
-    received_at: string;
-    gmail_link: string;
-  };
-};
-
-type EditForm = { task: string; deadline_phrase: string; assignee: string };
-
-async function apiCall(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed (${res.status})`);
-  }
-  return res.json();
+let toastCounter = 0;
+function nextToastId(): string {
+  toastCounter += 1;
+  return `toast-${toastCounter}`;
 }
 
 export default function ReviewPage() {
@@ -72,10 +32,13 @@ export default function ReviewPage() {
   const [scanning, setScanning] = useState(false);
   const [extracting, setExtracting] = useState(false);
 
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<EditForm>({ task: "", deadline_phrase: "", assignee: "" });
   const [busyId, setBusyId] = useState<number | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<Record<number, string>>({});
+
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   async function loadCandidates() {
     setLoading(true);
@@ -91,8 +54,38 @@ export default function ReviewPage() {
   }
 
   useEffect(() => {
-    loadCandidates();
+    // loadCandidates() sets state (setLoading/setError) before its first
+    // await — calling it directly here would run that synchronously
+    // within the effect body, which react-hooks now flags. Deferring
+    // through a microtask keeps this an on-mount fetch (fires before the
+    // next paint) without a synchronous setState-in-effect call.
+    queueMicrotask(() => {
+      loadCandidates();
+    });
   }, []);
+
+  function pushToast(message: string, kind: ToastItem["kind"]) {
+    setToasts((prev) => {
+      // Don't stack duplicate persistent auth-error prompts (V2.7 Decision
+      // 2 — the backend already debounces publishing these, but guard here
+      // too in case of a reconnect replaying state).
+      if (kind === "auth_error" && prev.some((t) => t.kind === "auth_error")) return prev;
+      const id = nextToastId();
+      if (kind === "info") {
+        setTimeout(() => setToasts((cur) => cur.filter((t) => t.id !== id)), 6000);
+      }
+      return [...prev, { id, message, kind }];
+    });
+  }
+
+  const { connected } = useEventSource((event: LiveEvent) => {
+    if (event.type === "new_candidate") {
+      pushToast(`New email: "${event.task || event.email_subject}" — 1 new task to review`, "info");
+      loadCandidates();
+    } else if (event.type === "auth_error") {
+      pushToast(event.message, "auth_error");
+    }
+  });
 
   async function handleScan() {
     setScanning(true);
@@ -195,29 +188,44 @@ export default function ReviewPage() {
     }
   }
 
-  return (
-    <main style={{ maxWidth: 720, margin: "0 auto", padding: "32px 16px" }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>Inbox-to-Action</h1>
-      <p className="muted" style={{ marginBottom: 24 }}>
-        Review task candidates before they go to Notion. Nothing is written to Notion here.
-      </p>
+  function selectSlot(id: number, slot: string) {
+    setSelectedSlot((prev) => ({ ...prev, [id]: slot }));
+  }
 
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 24,
-          paddingBottom: 20,
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
+  useKeyboardShortcuts({
+    candidateIds: candidates.map((c) => c.id),
+    selectedId,
+    onSelect: setSelectedId,
+    onApprove: approve,
+    onDismiss: dismiss,
+    onEdit: (id) => {
+      const candidate = candidates.find((c) => c.id === id);
+      if (candidate) startEdit(candidate);
+    },
+    enabled: editingId === null && busyId === null,
+  });
+
+  return (
+    <main className={styles.main}>
+      <div className={styles.headerRow}>
+        <h1 className={styles.title}>Inbox-to-Action</h1>
+        <span className={styles.liveIndicator}>
+          <span className={`${styles.liveDot} ${connected ? styles.connected : ""}`} />
+          {connected ? "Live" : "Connecting…"}
+        </span>
+      </div>
+      <p className={styles.subtitle}>
+        Gmail is checked automatically every ~2 minutes. Review task candidates before they go to
+        Notion — nothing is written to Notion here.
+      </p>
+      <p className={styles.shortcutHint}>Shortcuts: j/k navigate · a approve · d dismiss · e edit</p>
+
+      <div className={styles.manualControls}>
         <button onClick={handleScan} disabled={scanning}>
-          {scanning ? "Scanning…" : "Scan Gmail"}
+          {scanning ? "Scanning…" : "Scan Gmail now"}
         </button>
         <button onClick={handleExtract} disabled={extracting}>
-          {extracting ? "Extracting…" : "Extract Tasks"}
+          {extracting ? "Extracting…" : "Extract tasks now"}
         </button>
         <button onClick={loadCandidates} disabled={loading}>
           Refresh
@@ -225,196 +233,36 @@ export default function ReviewPage() {
       </div>
 
       {(scanStatus || extractStatus) && (
-        <div className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
+        <div className={styles.manualStatus}>
           {scanStatus && <div>Scan: {scanStatus}</div>}
           {extractStatus && <div>Extract: {extractStatus}</div>}
         </div>
       )}
 
-      {loading && <p className="muted">Loading…</p>}
+      {error && <p className={styles.errorText}>{error}</p>}
 
-      {error && (
-        <p style={{ color: "var(--danger)", marginBottom: 16 }}>
-          {error}
-        </p>
-      )}
+      <DashboardSummary candidates={candidates} />
 
-      {!loading && !error && candidates.length === 0 && (
-        <p className="muted">No candidates need review right now.</p>
-      )}
+      <CandidateList
+        candidates={candidates}
+        loading={loading}
+        selectedId={selectedId}
+        editingId={editingId}
+        busyId={busyId}
+        editForm={editForm}
+        selectedSlot={selectedSlot}
+        onSelect={setSelectedId}
+        onStartEdit={startEdit}
+        onCancelEdit={cancelEdit}
+        onEditFormChange={setEditForm}
+        onSaveEdit={saveEdit}
+        onApprove={approve}
+        onDismiss={dismiss}
+        onBookCalendar={bookCalendar}
+        onSelectSlot={selectSlot}
+      />
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {candidates.map((c) => {
-          const isEditing = editingId === c.id;
-          const isBusy = busyId === c.id;
-
-          return (
-            <div
-              key={c.id}
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                padding: 16,
-                background: "var(--card-bg)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  marginBottom: 8,
-                  fontSize: 13,
-                }}
-              >
-                <span className="muted">
-                  {c.email.from_address} — {c.email.subject}
-                </span>
-                <a href={c.email.gmail_link} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>
-                  View email ↗
-                </a>
-              </div>
-
-              {isEditing ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <textarea
-                    value={editForm.task}
-                    onChange={(e) => setEditForm({ ...editForm, task: e.target.value })}
-                    rows={2}
-                    placeholder="Task"
-                  />
-                  <input
-                    value={editForm.deadline_phrase}
-                    onChange={(e) => setEditForm({ ...editForm, deadline_phrase: e.target.value })}
-                    placeholder="Deadline (e.g. Friday, Sept 1st)"
-                  />
-                  <input
-                    value={editForm.assignee}
-                    onChange={(e) => setEditForm({ ...editForm, assignee: e.target.value })}
-                    placeholder="Assignee (optional)"
-                  />
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="primary" onClick={() => saveEdit(c.id)} disabled={isBusy}>
-                      {isBusy ? "Saving…" : "Save"}
-                    </button>
-                    <button onClick={cancelEdit} disabled={isBusy}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <p style={{ marginBottom: 8 }}>{c.task}</p>
-                  <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-                    {c.deadline_phrase && (
-                      <span>
-                        Due: {c.deadline_phrase}
-                        {c.resolved_due_date ? ` (${c.resolved_due_date})` : " (not resolved)"}
-                        {" · "}
-                      </span>
-                    )}
-                    {c.assignee && <span>Assignee: {c.assignee} · </span>}
-                    Confidence: {Math.round(c.confidence * 100)}%
-                    {c.status === "edited" && " · edited"}
-                  </div>
-                  <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
-                    {c.reason}
-                  </p>
-
-                  {/* V2.6 Scheduling Agent — informational only. Booking is
-                      always a separate click below, never part of Approve. */}
-                  {c.proposed_meeting_phrase && (
-                    <div
-                      className="muted"
-                      style={{
-                        fontSize: 13,
-                        marginBottom: 12,
-                        padding: 8,
-                        border: "1px solid var(--border)",
-                        borderRadius: 6,
-                      }}
-                    >
-                      <div>
-                        {c.scheduling_source === "deadline" ? "Deadline commitment: " : "Proposed meeting: "}
-                        {c.proposed_meeting_phrase}
-                        {c.resolved_meeting_time
-                          ? ` (${formatNaiveUtc(c.resolved_meeting_time)})`
-                          : " (not resolved)"}
-                      </div>
-                      {c.calendar_status === "unavailable" && (
-                        <div>Calendar not connected — grant calendar access to see availability.</div>
-                      )}
-                      {c.calendar_status === "free" && <div>This time is free on your calendar.</div>}
-                      {c.calendar_status === "conflict" && (
-                        <div style={{ marginTop: 4 }}>
-                          {c.scheduling_source === "deadline"
-                            ? "You have something else on around this deadline."
-                            : "Conflict at the proposed time."}
-                          {c.suggested_meeting_slots && c.suggested_meeting_slots.length > 0 ? (
-                            <>
-                              {" "}
-                              {c.scheduling_source === "deadline" ? "Free time nearby:" : "Alternatives:"}{" "}
-                              <select
-                                value={selectedSlot[c.id] || c.suggested_meeting_slots[0]}
-                                onChange={(e) =>
-                                  setSelectedSlot({ ...selectedSlot, [c.id]: e.target.value })
-                                }
-                              >
-                                {c.suggested_meeting_slots.map((slot) => (
-                                  <option key={slot} value={slot}>
-                                    {new Date(slot).toLocaleString()}
-                                  </option>
-                                ))}
-                              </select>
-                            </>
-                          ) : (
-                            " No free alternatives found this week."
-                          )}
-                        </div>
-                      )}
-                      {c.calendar_booked ? (
-                        <div style={{ marginTop: 4 }}>Added to calendar.</div>
-                      ) : (
-                        (c.calendar_status === "free" || c.calendar_status === "conflict") && (
-                          <button
-                            style={{ marginTop: 8 }}
-                            disabled={
-                              isBusy ||
-                              (c.calendar_status === "conflict" &&
-                                (!c.suggested_meeting_slots || c.suggested_meeting_slots.length === 0))
-                            }
-                            onClick={() => {
-                              const slot =
-                                c.calendar_status === "conflict"
-                                  ? selectedSlot[c.id] || (c.suggested_meeting_slots || [])[0]
-                                  : c.resolved_meeting_time;
-                              if (slot) bookCalendar(c.id, slot);
-                            }}
-                          >
-                            {isBusy ? "…" : "Also add to calendar"}
-                          </button>
-                        )
-                      )}
-                    </div>
-                  )}
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="primary" onClick={() => approve(c.id)} disabled={isBusy}>
-                      {isBusy ? "…" : "Approve"}
-                    </button>
-                    <button onClick={() => startEdit(c)} disabled={isBusy}>
-                      Edit
-                    </button>
-                    <button className="danger" onClick={() => dismiss(c.id)} disabled={isBusy}>
-                      Dismiss
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <Toast toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
     </main>
   );
 }

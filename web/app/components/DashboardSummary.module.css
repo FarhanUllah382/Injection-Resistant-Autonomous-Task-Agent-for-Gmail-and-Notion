@@ -1,0 +1,25 @@
+.strip {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.count {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.1;
+}
+
+.label {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+}
