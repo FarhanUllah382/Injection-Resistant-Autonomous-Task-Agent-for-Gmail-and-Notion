@@ -89,6 +89,17 @@ class TaskCandidate(SQLModel, table=True):
     policy_decision: Optional[str] = None  # "auto_eligible" | "review_required"
     deadline_resolved: Optional[bool] = None
 
+    # V2.7: the raw V2.4 signals that fed policy_decision above, persisted
+    # alongside it instead of being discarded after compute_policy() reads
+    # them (app/routes_extract.py). Nothing new is computed — this is pure
+    # storage of an existing value, so the review UI can show a distinct
+    # "flagged" badge for a V2.4 override specifically, rather than lumping
+    # it in with every other review_required candidate (most of which are
+    # review_required for ordinary reasons — below the auto-confidence bar,
+    # an unresolved deadline, or a named assignee — not a security flag).
+    injection_suspected: Optional[bool] = None
+    sender_trust_signal: Optional[str] = None  # "known" | "unknown_domain" | "suspicious" (app/sender_trust.py's SenderTrust)
+
     # Scheduling Agent output (V2.6, Decisions 3-4). claude_* immutable once
     # written, same convention as the task/deadline/assignee fields above.
     # resolved_meeting_time is app-computed by app/meeting_time_resolver.py

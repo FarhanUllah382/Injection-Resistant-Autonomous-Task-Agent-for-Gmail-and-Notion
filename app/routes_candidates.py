@@ -64,6 +64,11 @@ def _serialize(candidate: TaskCandidate, email: Email, session: Session) -> dict
         "created_at": candidate.created_at,
         # Shadow-mode only (V2.3) — informational, nothing acts on this yet.
         "policy_decision": candidate.policy_decision,
+        # V2.7: the raw V2.4 signals behind policy_decision, exposed so the
+        # UI can distinguish "flagged for injection/spoofing specifically"
+        # from ordinary review_required (app/models.py has the full note).
+        "injection_suspected": candidate.injection_suspected,
+        "sender_trust_signal": candidate.sender_trust_signal,
         # Scheduling Agent output (V2.6) — read-only info for the review UI.
         # Booking is a separate action (POST /candidates/{id}/book-calendar,
         # app/routes_scheduling.py), never triggered from here.

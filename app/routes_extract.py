@@ -1,5 +1,5 @@
 """
-POST /extract — stored emails -> task_candidates.
+Stored emails -> task_candidates.
 
 Reuses the Phase 1 extractor unchanged. Deliberately stops at candidate
 creation: no approval/edit logic and no Notion sync here (see CLAUDE.md
@@ -51,18 +51,35 @@ are computed exactly as before via app/deadline_resolver.py (now fixed to
 correctly resolve time-bearing phrases to a date — see that module) —
 nothing about compute_policy()'s inputs or app/policy.py's rules changes
 here beyond that resolver bug fix flowing through as intended.
+
+V2.7 (Design Decisions V2.7): the actual extraction logic now lives in
+run_extract(), a plain function taking a Session instead of `Depends`, so
+app/scheduler.py's automatic poll can call the exact same code a manual
+POST /extract already did (Decision 1's "no logic duplication" principle,
+same pattern as run_scan() in app/routes_scan.py). Two additive changes
+inside the existing candidate-creation block, nothing else touched:
+1. injection_suspected/sender_trust — already computed here to feed
+   compute_policy() and previously discarded afterward — are now also
+   stored directly on the candidate, so the review UI can show a distinct
+   "flagged" badge for a V2.4 override specifically, instead of lumping it
+   in with every other review_required candidate (V2.7 Decision 7 item 3).
+2. A `new_candidate` event is published via app/events.py's in-process bus
+   right after a candidate is committed, for the review UI's SSE toast/badge
+   (V2.7 Decision 5). Nothing about what gets computed or decided changes.
 """
 
 from datetime import datetime, timezone as dt_timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends
+
 from sqlmodel import Session, select
 
 from app.config import THREAD_CONTEXT_DEPTH
 from app.correction_notes import get_active_notes
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
+from app.events import event_bus
 from app.meeting_time_resolver import resolve_meeting_time_phrase
 from app.models import Email, EmailAccount, TaskCandidate, User
 from app.policy import compute_policy
@@ -134,8 +151,11 @@ def _build_thread_context(session: Session, email: Email) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-@router.post("/extract")
-async def extract(max_emails: int = 20, session: Session = Depends(get_session)):
+async def run_extract(session: Session, max_emails: int = 20) -> dict:
+    """The actual extraction pipeline — identical to what the route always
+    did, just callable without an HTTP request (V2.7 Decision 1). Returns a
+    zero-count dict (not an exception) when there's no user yet, matching
+    the route's pre-existing behavior."""
     user = session.exec(select(User)).first()
     if user is None:
         return {
@@ -220,6 +240,11 @@ async def extract(max_emails: int = 20, session: Session = Depends(get_session))
                     injection_suspected=injection_suspected,
                     sender_trust_signal=sender_trust,
                 ),
+                # V2.7: persist the two raw signals that already fed the
+                # policy call above — nothing new computed, just no longer
+                # discarded after compute_policy() reads them.
+                injection_suspected=injection_suspected,
+                sender_trust_signal=sender_trust,
                 deadline_resolved=deadline_resolved,
                 proposed_meeting_phrase=scheduling_phrase,
                 resolved_meeting_time=scheduling_time,
@@ -229,6 +254,18 @@ async def extract(max_emails: int = 20, session: Session = Depends(get_session))
             session.add(candidate)
             session.commit()
             session.refresh(candidate)
+
+            # V2.7 Decision 5 — notify any open review-UI tab. Purely
+            # additive: publishing has no effect if nothing is subscribed
+            # (app/events.py), and never blocks/raises into this loop.
+            event_bus.publish(
+                {
+                    "type": "new_candidate",
+                    "candidate_id": candidate.id,
+                    "task": candidate.claude_task,
+                    "email_subject": email.subject,
+                }
+            )
 
             # Scheduling Agent (V2.6 Decision 4, corrected) — read-only
             # calendar check, whenever a scheduling-relevant time was
@@ -258,3 +295,8 @@ async def extract(max_emails: int = 20, session: Session = Depends(get_session))
         "triaged_out": triaged_out,
         "failed": failed,
     }
+
+
+@router.post("/extract")
+async def extract(max_emails: int = 20, session: Session = Depends(get_session)):
+    return await run_extract(session, max_emails)

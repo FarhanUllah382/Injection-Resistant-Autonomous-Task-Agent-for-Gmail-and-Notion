@@ -18,3 +18,8 @@ notion-client>=2.2.1
 # stdio (Design Decisions V2.1, Decision 3); pinned <2.0 for the stable
 # FastMCP/stdio-client API (2.x renamed the server API and is very new)
 mcp>=1.6.0,<2.0.0
+
+# V2.7: in-process ~2-min Gmail poll inside the existing FastAPI process —
+# avoids adding Celery/Redis; CLAUDE.md's "no background workers" default is
+# deliberately superseded here (Design Decisions V2.7, Decision 1)
+apscheduler>=3.10,<4.0

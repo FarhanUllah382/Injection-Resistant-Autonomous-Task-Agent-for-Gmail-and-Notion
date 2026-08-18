@@ -1,5 +1,5 @@
 """
-POST /scan — Gmail -> database only.
+Gmail -> database only.
 
 Fetches recent inbox messages, skips ones already stored, preprocesses the
 body, and saves them as Email rows. Deliberately stops there: no extraction,
@@ -11,6 +11,16 @@ route awaits the Gmail MCP subprocess call (Design Decisions V2.1, Decision
 Gmail fetch calls go through the Gmail MCP server (mcp_servers/gmail_mcp),
 which wraps app/gmail_client.py unchanged — same OAuth/token/dedup logic as
 V1, new transport (Decisions 1 & 3).
+
+V2.7 (Design Decisions V2.7, Decision 1): the actual scan logic now lives in
+run_scan(), a plain function taking a Session instead of `Depends`, so
+app/scheduler.py's automatic ~2-minute poll can call the exact same code a
+manual POST /scan already did — no second implementation to drift out of
+sync (Decision 1's rationale). The route below is now a thin adapter that
+just converts "not configured yet" into the same 400 it always returned.
+run_scan() raises ScanSetupError instead of HTTPException so the scheduler
+can distinguish "Gmail isn't connected yet" (skip the tick, not a failure)
+from a real error (counts toward Decision 2's backoff).
 """
 
 from datetime import datetime
@@ -26,6 +36,12 @@ from app.preprocessing import clean_email_body
 router = APIRouter(tags=["scan"])
 
 
+class ScanSetupError(Exception):
+    """No user / no Gmail account connected yet. Not a polling failure —
+    app/scheduler.py catches this separately and skips the tick without
+    touching the failure/backoff counter (V2.7 Decision 2)."""
+
+
 def _persist_token_update(session: Session, account: EmailAccount, token_update: dict | None) -> None:
     """Persist a rotated Gmail access token reported by the MCP server —
     mirrors V1's `creds.token != account.access_token` check, just fed by
@@ -39,17 +55,20 @@ def _persist_token_update(session: Session, account: EmailAccount, token_update:
     session.commit()
 
 
-@router.post("/scan")
-async def scan(max_results: int = 20, session: Session = Depends(get_session)):
+async def run_scan(session: Session, max_results: int = 20) -> dict:
+    """The actual scan logic — identical to what the route always did, just
+    callable without an HTTP request (V2.7 Decision 1). Raises
+    ScanSetupError if Gmail isn't connected; any other exception (Gmail API
+    error, MCP failure) propagates as-is."""
     user = session.exec(select(User)).first()
     if user is None:
-        raise HTTPException(400, "No user found — connect Gmail via /auth/google/login first")
+        raise ScanSetupError("No user found — connect Gmail via /auth/google/login first")
 
     account = session.exec(
         select(EmailAccount).where(EmailAccount.user_id == user.id)
     ).first()
     if account is None:
-        raise HTTPException(400, "No Gmail account connected — visit /auth/google/login first")
+        raise ScanSetupError("No Gmail account connected — visit /auth/google/login first")
 
     async with gmail_session(account.access_token, account.refresh_token) as mcp:
         list_result = unwrap(await mcp.call_tool("list_recent_messages", {"max_results": max_results}))
@@ -97,3 +116,11 @@ async def scan(max_results: int = 20, session: Session = Depends(get_session)):
         "new": new_count,
         "skipped": len(candidate_ids) - new_count,
     }
+
+
+@router.post("/scan")
+async def scan(max_results: int = 20, session: Session = Depends(get_session)):
+    try:
+        return await run_scan(session, max_results)
+    except ScanSetupError as e:
+        raise HTTPException(400, str(e))
