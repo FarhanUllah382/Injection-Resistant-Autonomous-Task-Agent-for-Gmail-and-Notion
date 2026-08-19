@@ -18,9 +18,12 @@ Note: Decision 2's original heuristic list also included a
 `List-Unsubscribe` header check. That header isn't captured anywhere in
 the pipeline — app/gmail_client.py's FetchedMessage and the `emails`
 table only carry From/Subject — and adding it would mean extending the
-Gmail fetch path and/or schema, both out of bounds for V2.2. Dropped for
-now per explicit sign-off; revisit if the fetch path is ever deliberately
-extended.
+Gmail fetch path and/or schema. Left out of this implementation as an
+in-scope-vs-out-of-scope call for V2.2, not a reviewed/approved decision
+— DESIGN_DECISIONS_V2.2.md's own Approval Status section is unchecked and
+its status banner still reads "DRAFT — AWAITING REVIEW." Revisit if the
+fetch path is ever deliberately extended, and get real sign-off on the
+tradeoff at that point rather than assuming this note constitutes one.
 """
 
 import re
