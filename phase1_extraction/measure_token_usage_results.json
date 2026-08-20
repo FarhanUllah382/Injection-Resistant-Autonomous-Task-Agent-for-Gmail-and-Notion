@@ -1,0 +1,113 @@
+{
+  "three_emails": [
+    {
+      "label": "email #1 \u2014 'Update pricing page'",
+      "model": "claude-sonnet-5",
+      "stop_reason": "end_turn",
+      "chars": {
+        "email_body": 47,
+        "thread_context": 0,
+        "system_prompt": 3271,
+        "user_prompt_total": 474
+      },
+      "pre_call_count_tokens": {
+        "input_tokens": 1318
+      },
+      "usage": {
+        "input_tokens": 1318,
+        "output_tokens": 127,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_tokens": 1445
+      },
+      "content_block_types": [
+        "text"
+      ],
+      "thinking_block_present": false,
+      "thinking_block_text_len": 0,
+      "response_text_preview": "```json\n{\n  \"actionable\": true,\n  \"task\": \"Update the pricing page\",\n  \"deadline\": \"Friday\",\n  \"assignee\": null,\n  \"reason\": \"The email explicitly req"
+    },
+    {
+      "label": "email #2 \u2014 'Contract renewal - action needed'",
+      "model": "claude-sonnet-5",
+      "stop_reason": "end_turn",
+      "chars": {
+        "email_body": 134,
+        "thread_context": 0,
+        "system_prompt": 3271,
+        "user_prompt_total": 577
+      },
+      "pre_call_count_tokens": {
+        "input_tokens": 1358
+      },
+      "usage": {
+        "input_tokens": 1358,
+        "output_tokens": 140,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_tokens": 1498
+      },
+      "content_block_types": [
+        "text"
+      ],
+      "thinking_block_present": false,
+      "thinking_block_text_len": 0,
+      "response_text_preview": "```json\n{\n  \"actionable\": true,\n  \"task\": \"Send over the renewal paperwork for the contract\",\n  \"deadline\": \"Sept 1st\",\n  \"assignee\": null,\n  \"reason\""
+    },
+    {
+      "label": "email #3 \u2014 'This week in AI: 5 stories you missed'",
+      "model": "claude-sonnet-5",
+      "stop_reason": "end_turn",
+      "chars": {
+        "email_body": 113,
+        "thread_context": 0,
+        "system_prompt": 3271,
+        "user_prompt_total": 564
+      },
+      "pre_call_count_tokens": {
+        "input_tokens": 1355
+      },
+      "usage": {
+        "input_tokens": 1355,
+        "output_tokens": 114,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_tokens": 1469
+      },
+      "content_block_types": [
+        "text"
+      ],
+      "thinking_block_present": false,
+      "thinking_block_text_len": 0,
+      "response_text_preview": "```json\n{\n  \"actionable\": false,\n  \"task\": null,\n  \"deadline\": null,\n  \"assignee\": null,\n  \"reason\": \"This is a newsletter providing informational con"
+    }
+  ],
+  "supplementary_thread_context": {
+    "label": "SUPPLEMENTARY (not one of the 3): email #1 WITH simulated 2-email thread_context",
+    "model": "claude-sonnet-5",
+    "stop_reason": "end_turn",
+    "chars": {
+      "email_body": 47,
+      "thread_context": 424,
+      "system_prompt": 3271,
+      "user_prompt_total": 922
+    },
+    "pre_call_count_tokens": {
+      "input_tokens": 1503
+    },
+    "usage": {
+      "input_tokens": 1503,
+      "output_tokens": 149,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "total_tokens": 1652
+    },
+    "content_block_types": [
+      "thinking",
+      "text"
+    ],
+    "thinking_block_present": true,
+    "thinking_block_text_len": 0,
+    "response_text_preview": "{\n  \"actionable\": true,\n  \"task\": \"Update pricing page\",\n  \"deadline\": \"Friday\",\n  \"assignee\": null,\n  \"reason\": \"The email explicitly requests updati"
+  }
+}

@@ -41,6 +41,12 @@ USER_TIMEZONE = os.getenv("USER_TIMEZONE")
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 
+# V2.7 — Gmail poll interval, in seconds. Configurable via env var so it can
+# be sped up temporarily (e.g. for a live demo) without touching code. The
+# failure-backoff interval in app/scheduler.py is a fixed floor, NOT derived
+# from this value — a demo-speed setting here never weakens that fail-safe.
+GMAIL_POLL_INTERVAL_SECONDS = int(os.getenv("GMAIL_POLL_INTERVAL_SECONDS", "120"))
+
 # Triage (V2.2) — deterministic pre-filter ahead of extraction (Design
 # Decisions V2.2, Decision 2). Empty blocklist by default: matches Decision
 # 3's fail-open policy — nothing is blocked by domain until the user

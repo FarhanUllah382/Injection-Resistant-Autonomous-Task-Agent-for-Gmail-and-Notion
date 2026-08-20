@@ -15,8 +15,10 @@ overlapping — made explicit below rather than relied on silently.
 
 Failure safety (Decision 2): a failed poll is logged, not surfaced as an
 error, and simply retried next interval — except after 3 consecutive
-failures, where the interval backs off to 10 minutes until a poll succeeds
-again, to avoid hammering a Gmail API that's genuinely having trouble. If a
+failures, where the interval backs off to a fixed 10-minute floor
+(BACKOFF_INTERVAL_SECONDS, not derived from the normal interval — see
+app/config.py's GMAIL_POLL_INTERVAL_SECONDS) until a poll succeeds again,
+to avoid hammering a Gmail API that's genuinely having trouble. If a
 failure looks like an OAuth/token problem specifically (as opposed to a
 transient network/API error), a single "reconnect Gmail" prompt is
 published via app/events.py — debounced to once per failure episode, not
@@ -41,6 +43,7 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session
 
+from app.config import GMAIL_POLL_INTERVAL_SECONDS
 from app.db import engine
 from app.events import event_bus
 from app.routes_extract import run_extract
@@ -49,8 +52,10 @@ from app.routes_scan import ScanSetupError, run_scan
 logger = logging.getLogger(__name__)
 
 JOB_ID = "gmail_poll"
-NORMAL_INTERVAL_MINUTES = 2
-BACKOFF_INTERVAL_MINUTES = 10
+NORMAL_INTERVAL_SECONDS = GMAIL_POLL_INTERVAL_SECONDS
+# Fixed floor, deliberately NOT scaled off NORMAL_INTERVAL_SECONDS — a
+# demo-speed normal interval must never weaken the real backoff safety net.
+BACKOFF_INTERVAL_SECONDS = 600
 FAILURE_THRESHOLD = 3
 
 # Best-effort substring match against Google auth library / OAuth error text
@@ -83,10 +88,10 @@ def get_status() -> dict:
     return {
         "consecutive_failures": _state.consecutive_failures,
         "backed_off": _state.consecutive_failures >= FAILURE_THRESHOLD,
-        "interval_minutes": (
-            BACKOFF_INTERVAL_MINUTES
+        "interval_seconds": (
+            BACKOFF_INTERVAL_SECONDS
             if _state.consecutive_failures >= FAILURE_THRESHOLD
-            else NORMAL_INTERVAL_MINUTES
+            else NORMAL_INTERVAL_SECONDS
         ),
     }
 
@@ -106,11 +111,11 @@ def _handle_poll_failure(exc: Exception) -> None:
 
     if _state.consecutive_failures == FAILURE_THRESHOLD and scheduler is not None:
         logger.warning(
-            "gmail poll: %d consecutive failures, backing off to %d-minute interval",
+            "gmail poll: %d consecutive failures, backing off to %ds interval",
             FAILURE_THRESHOLD,
-            BACKOFF_INTERVAL_MINUTES,
+            BACKOFF_INTERVAL_SECONDS,
         )
-        scheduler.reschedule_job(JOB_ID, trigger="interval", minutes=BACKOFF_INTERVAL_MINUTES)
+        scheduler.reschedule_job(JOB_ID, trigger="interval", seconds=BACKOFF_INTERVAL_SECONDS)
 
 
 def _handle_poll_success() -> None:
@@ -118,8 +123,8 @@ def _handle_poll_success() -> None:
     _state.consecutive_failures = 0
     _state.auth_prompt_sent = False
     if was_backed_off and scheduler is not None:
-        logger.info("gmail poll: recovered, resuming %d-minute interval", NORMAL_INTERVAL_MINUTES)
-        scheduler.reschedule_job(JOB_ID, trigger="interval", minutes=NORMAL_INTERVAL_MINUTES)
+        logger.info("gmail poll: recovered, resuming %ds interval", NORMAL_INTERVAL_SECONDS)
+        scheduler.reschedule_job(JOB_ID, trigger="interval", seconds=NORMAL_INTERVAL_SECONDS)
 
 
 async def poll_once(max_results: int = 20, max_emails: int = 20) -> None:
@@ -153,13 +158,13 @@ def start() -> None:
     scheduler.add_job(
         poll_once,
         trigger="interval",
-        minutes=NORMAL_INTERVAL_MINUTES,
+        seconds=NORMAL_INTERVAL_SECONDS,
         id=JOB_ID,
         max_instances=1,  # single-flight (Decision 2) — made explicit, not relied on silently
         coalesce=True,  # a burst of missed ticks (e.g. process was suspended) runs once, not N times
     )
     scheduler.start()
-    logger.info("gmail poll scheduler started (%d-minute interval)", NORMAL_INTERVAL_MINUTES)
+    logger.info("gmail poll scheduler started (%ds interval)", NORMAL_INTERVAL_SECONDS)
 
 
 def shutdown() -> None:

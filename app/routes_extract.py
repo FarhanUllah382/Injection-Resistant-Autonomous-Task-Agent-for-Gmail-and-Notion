@@ -255,18 +255,6 @@ async def run_extract(session: Session, max_emails: int = 20) -> dict:
             session.commit()
             session.refresh(candidate)
 
-            # V2.7 Decision 5 — notify any open review-UI tab. Purely
-            # additive: publishing has no effect if nothing is subscribed
-            # (app/events.py), and never blocks/raises into this loop.
-            event_bus.publish(
-                {
-                    "type": "new_candidate",
-                    "candidate_id": candidate.id,
-                    "task": candidate.claude_task,
-                    "email_subject": email.subject,
-                }
-            )
-
             # Scheduling Agent (V2.6 Decision 4, corrected) — read-only
             # calendar check, whenever a scheduling-relevant time was
             # resolved from either an explicit meeting proposal or a
@@ -283,6 +271,24 @@ async def run_extract(session: Session, max_emails: int = 20) -> dict:
                     )
                 session.add(candidate)
                 session.commit()
+
+            # V2.7 Decision 5 — notify any open review-UI tab. Fires AFTER
+            # the scheduling check above (not right after creation) so a
+            # client that refreshes the instant it's notified sees the
+            # final calendar_status, not a pre-check snapshot with no
+            # "Also add to calendar" button and no free/conflict message —
+            # the exact staleness bug this ordering used to cause. Purely
+            # additive either way: publishing has no effect if nothing is
+            # subscribed (app/events.py), and never blocks/raises into this
+            # loop.
+            event_bus.publish(
+                {
+                    "type": "new_candidate",
+                    "candidate_id": candidate.id,
+                    "task": candidate.claude_task,
+                    "email_subject": email.subject,
+                }
+            )
         else:
             not_actionable += 1
 
