@@ -72,21 +72,43 @@ def debug_anthropic_check() -> dict:
 
     import httpx2
 
-    start = time.monotonic()
-    try:
-        resp = httpx2.post(
-            "https://api.anthropic.com/v1/messages",
-            json={},
-            timeout=15.0,
+    def _try(label: str, fn):
+        start = time.monotonic()
+        try:
+            resp = fn()
+            return {
+                "label": label,
+                "reached_anthropic": True,
+                "status_code": resp.status_code,
+                "elapsed_seconds": round(time.monotonic() - start, 2),
+            }
+        except Exception as e:  # noqa: BLE001 — diagnostic endpoint, report anything
+            return {
+                "label": label,
+                "reached_anthropic": False,
+                "error": repr(e),
+                "elapsed_seconds": round(time.monotonic() - start, 2),
+            }
+
+    raw = _try(
+        "raw_httpx2_no_client",
+        lambda: httpx2.post("https://api.anthropic.com/v1/messages", json={}, timeout=15.0),
+    )
+
+    # Same Anthropic() wrapper + same custom IPv4 transport the real
+    # extractor uses, but with a throwaway fake key — isolates whether the
+    # SDK wrapper/custom-transport combo itself is the problem, independent
+    # of whatever the real ANTHROPIC_API_KEY env var actually contains.
+    from anthropic import Anthropic
+
+    ipv4_client = httpx2.Client(transport=httpx2.HTTPTransport(local_address="0.0.0.0"))
+
+    def _via_sdk():
+        client = Anthropic(api_key="sk-ant-fake-diagnostic-key", http_client=ipv4_client, max_retries=0)
+        return client.messages.with_raw_response.create(
+            model="claude-sonnet-5", max_tokens=10, messages=[{"role": "user", "content": "hi"}]
         )
-        return {
-            "reached_anthropic": True,
-            "status_code": resp.status_code,
-            "elapsed_seconds": round(time.monotonic() - start, 2),
-        }
-    except Exception as e:  # noqa: BLE001 — diagnostic endpoint, report anything
-        return {
-            "reached_anthropic": False,
-            "error": repr(e),
-            "elapsed_seconds": round(time.monotonic() - start, 2),
-        }
+
+    via_sdk = _try("anthropic_sdk_with_ipv4_transport_fake_key", _via_sdk)
+
+    return {"raw": raw, "via_sdk": via_sdk}
