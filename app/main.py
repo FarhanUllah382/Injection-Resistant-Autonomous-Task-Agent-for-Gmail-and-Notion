@@ -60,3 +60,33 @@ def on_shutdown() -> None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/debug/anthropic-check")
+def debug_anthropic_check() -> dict:
+    """Temporary diagnostic — isolates network reachability to
+    api.anthropic.com from API-key correctness. No key sent; a 401 means
+    the connection succeeded, only auth was (expectedly) rejected. Remove
+    once the Render/Anthropic connectivity issue is resolved."""
+    import time
+
+    import httpx2
+
+    start = time.monotonic()
+    try:
+        resp = httpx2.post(
+            "https://api.anthropic.com/v1/messages",
+            json={},
+            timeout=15.0,
+        )
+        return {
+            "reached_anthropic": True,
+            "status_code": resp.status_code,
+            "elapsed_seconds": round(time.monotonic() - start, 2),
+        }
+    except Exception as e:  # noqa: BLE001 — diagnostic endpoint, report anything
+        return {
+            "reached_anthropic": False,
+            "error": repr(e),
+            "elapsed_seconds": round(time.monotonic() - start, 2),
+        }
