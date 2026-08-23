@@ -1,4 +1,9 @@
 anthropic>=0.38.0
+# anthropic>=1.0 depends on httpx2 (its httpx successor) rather than httpx.
+# Imported directly in phase1_extraction/extractor.py to force IPv4 (see
+# that file's comment) — already pulled in transitively by anthropic, but
+# pinned explicitly here since we import it ourselves, not just anthropic.
+httpx2>=2.0.0,<3
 python-dotenv>=1.0.0
 
 # Phase 2: backend

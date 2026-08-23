@@ -22,18 +22,20 @@ from typing import Optional, Dict, Any, List
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import httpx
+import httpx2
 from anthropic import Anthropic
 from phase1_extraction.extraction_prompt import EXTRACTION_SYSTEM_PROMPT, build_user_prompt
 from phase1_extraction.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 
 # Some hosts (seen on Render's free tier) resolve api.anthropic.com's AAAA
-# record but have no working outbound IPv6 route, so httpx hangs ~30-40s
-# per call before failing with a generic "Connection error." Forcing the
-# client to bind IPv4 skips the dead IPv6 attempt entirely. Other outbound
-# calls in this project (Gmail/Notion via googleapiclient/notion-client)
-# aren't affected because those libraries default to IPv4.
-_ipv4_http_client = httpx.Client(transport=httpx.HTTPTransport(local_address="0.0.0.0"))
+# record but have no working outbound IPv6 route, so the client hangs
+# ~30-40s per call before failing with a generic "Connection error." Forcing
+# the client to bind IPv4 skips the dead IPv6 attempt entirely. Other
+# outbound calls in this project (Gmail/Notion via googleapiclient/
+# notion-client) aren't affected because those libraries default to IPv4.
+# anthropic>=1.0 depends on the `httpx2` package (its httpx successor), not
+# `httpx` — the client passed to `http_client=` must be an httpx2.Client.
+_ipv4_http_client = httpx2.Client(transport=httpx2.HTTPTransport(local_address="0.0.0.0"))
 
 NOTES_BLOCK_TEMPLATE = """
 
