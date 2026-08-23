@@ -11,6 +11,8 @@ service/port/container — just a scheduled call inside the process that was
 already running. Run with: uvicorn app.main:app --reload
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,11 +27,13 @@ from app.routes_scheduling import router as scheduling_router
 
 app = FastAPI(title="Inbox-to-Action")
 
-# Local-dev only: the Next.js review UI (localhost:3000) calls this API
-# (localhost:8000) directly from the browser.
+# The Next.js review UI calls this API directly from the browser. Defaults
+# to local dev; in production set ALLOWED_ORIGINS to a comma-separated list
+# of the deployed frontend origin(s), e.g. https://inbox-to-action-web.onrender.com
+_allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[origin.strip() for origin in _allowed_origins.split(",") if origin.strip()],
     allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["Content-Type"],
 )

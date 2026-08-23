@@ -1,0 +1,55 @@
+databases:
+  - name: inbox-to-action-db
+    plan: free
+    databaseName: inbox_to_action
+    user: inbox
+
+services:
+  # FastAPI backend — single process, single instance (see CLAUDE.md: the
+  # ~2-min Gmail poll and the OAuth pending-flow state are both in-process
+  # and in-memory, so this must never be scaled to more than 1 instance).
+  - type: web
+    name: inbox-to-action-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: inbox-to-action-db
+          property: connectionString
+      - key: ALLOWED_ORIGINS
+        value: https://inbox-to-action-web.onrender.com
+      - key: GOOGLE_REDIRECT_URI
+        value: https://inbox-to-action-api.onrender.com/auth/google/callback
+      - key: GMAIL_POLL_INTERVAL_SECONDS
+        value: "120"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: USER_TIMEZONE
+        sync: false
+      - key: NOTION_API_KEY
+        sync: false
+      - key: NOTION_DATABASE_ID
+        sync: false
+
+  # Next.js review UI.
+  - type: web
+    name: inbox-to-action-web
+    runtime: node
+    plan: free
+    buildCommand: cd web && npm install && npm run build
+    startCommand: cd web && npm run start -- -p $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: "20.11.1"
+      - key: NEXT_PUBLIC_API_URL
+        value: https://inbox-to-action-api.onrender.com
