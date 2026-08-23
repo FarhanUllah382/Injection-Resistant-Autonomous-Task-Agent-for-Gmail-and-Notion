@@ -111,4 +111,20 @@ def debug_anthropic_check() -> dict:
 
     via_sdk = _try("anthropic_sdk_with_ipv4_transport_fake_key", _via_sdk)
 
-    return {"raw": raw, "via_sdk": via_sdk}
+    # Same again but with the real key from the environment — never logged,
+    # never returned, only used to construct the client. Isolates whether
+    # something about the real key value specifically (as opposed to any
+    # syntactically-valid key) causes the hang the real extractor hits.
+    real_key = os.getenv("ANTHROPIC_API_KEY")
+
+    def _via_sdk_real_key():
+        client = Anthropic(api_key=real_key, http_client=ipv4_client, max_retries=0)
+        return client.messages.with_raw_response.create(
+            model="claude-sonnet-5", max_tokens=10, messages=[{"role": "user", "content": "hi"}]
+        )
+
+    via_sdk_real_key = _try("anthropic_sdk_with_ipv4_transport_real_key", _via_sdk_real_key)
+    via_sdk_real_key["key_len"] = len(real_key) if real_key else 0
+    via_sdk_real_key["key_has_whitespace"] = bool(real_key and real_key != real_key.strip())
+
+    return {"raw": raw, "via_sdk_fake_key": via_sdk, "via_sdk_real_key": via_sdk_real_key}
