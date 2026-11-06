@@ -28,10 +28,12 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from app.config import DEMO_MODE
 from app.db import get_session
 from app.mcp_clients import gmail_session, unwrap
 from app.models import Email, EmailAccount, User
 from app.preprocessing import clean_email_body
+from app.rate_limit import rate_limit_scan
 
 router = APIRouter(tags=["scan"])
 
@@ -60,6 +62,13 @@ async def run_scan(session: Session, max_results: int = 20) -> dict:
     callable without an HTTP request (V2.7 Decision 1). Raises
     ScanSetupError if Gmail isn't connected; any other exception (Gmail API
     error, MCP failure) propagates as-is."""
+    if DEMO_MODE:
+        # Public demo: the inbox is the fixed synthetic set seeded once at
+        # startup (app/demo_data.py) — there's no real Gmail account to
+        # fetch from, and the account row that exists only satisfies a
+        # foreign key (see that module). Never call the Gmail MCP here.
+        return {"fetched": 0, "new": 0, "skipped": 0, "demo_mode": True}
+
     user = session.exec(select(User)).first()
     if user is None:
         raise ScanSetupError("No user found — connect Gmail via /auth/google/login first")
@@ -118,7 +127,7 @@ async def run_scan(session: Session, max_results: int = 20) -> dict:
     }
 
 
-@router.post("/scan")
+@router.post("/scan", dependencies=[Depends(rate_limit_scan)])
 async def scan(max_results: int = 20, session: Session = Depends(get_session)):
     try:
         return await run_scan(session, max_results)

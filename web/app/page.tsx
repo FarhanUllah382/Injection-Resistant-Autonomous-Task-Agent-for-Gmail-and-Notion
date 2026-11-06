@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiCall, type Candidate, type EditForm } from "@/lib/api";
+import { API_URL, AuthError, apiCall, type Candidate, type EditForm } from "@/lib/api";
+import { clearToken, getToken } from "@/lib/auth";
 import { useEventSource, type LiveEvent } from "./hooks/useEventSource";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import DashboardSummary from "./components/DashboardSummary";
 import CandidateList from "./components/CandidateList";
+import LoginScreen from "./components/LoginScreen";
 import Toast, { type ToastItem } from "./components/Toast";
 import styles from "./page.module.css";
 
@@ -23,9 +25,44 @@ function nextToastId(): string {
 }
 
 export default function ReviewPage() {
+  // null = "not checked yet" (avoids a flash of the login screen while
+  // sessionStorage is read on mount); true/false once known.
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
+
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // /health needs no token. Drives both the "synthetic data" banner and
+  // the login gate below: DEMO_MODE's backend skips token checking
+  // entirely (app/auth.py), so the login screen would just be a pointless
+  // extra click for a public demo — skip it there too, straight to
+  // logged-in. Otherwise fall back to whatever's already in
+  // sessionStorage from a previous visit this tab.
+  useEffect(() => {
+    fetch(`${API_URL}/health`)
+      .then((res) => res.json())
+      .then((data) => {
+        const isDemo = Boolean(data.demo_mode);
+        setDemoMode(isDemo);
+        setLoggedIn(isDemo ? true : getToken() !== null);
+      })
+      .catch(() => setLoggedIn(getToken() !== null));
+  }, []);
+
+  function handleAuthError(e: unknown): boolean {
+    if (e instanceof AuthError) {
+      setLoggedIn(false);
+      return true;
+    }
+    return false;
+  }
+
+  function logout() {
+    clearToken();
+    setLoggedIn(false);
+  }
 
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [extractStatus, setExtractStatus] = useState<string | null>(null);
@@ -47,13 +84,16 @@ export default function ReviewPage() {
       const data = await apiCall("/candidates");
       setCandidates(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load candidates");
+      if (!handleAuthError(e)) {
+        setError(e instanceof Error ? e.message : "Failed to load candidates");
+      }
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
+    if (!loggedIn) return;
     // loadCandidates() sets state (setLoading/setError) before its first
     // await — calling it directly here would run that synchronously
     // within the effect body, which react-hooks now flags. Deferring
@@ -62,7 +102,7 @@ export default function ReviewPage() {
     queueMicrotask(() => {
       loadCandidates();
     });
-  }, []);
+  }, [loggedIn]);
 
   function pushToast(message: string, kind: ToastItem["kind"]) {
     setToasts((prev) => {
@@ -85,7 +125,7 @@ export default function ReviewPage() {
     } else if (event.type === "auth_error") {
       pushToast(event.message, "auth_error");
     }
-  });
+  }, loggedIn === true);
 
   async function handleScan() {
     setScanning(true);
@@ -94,7 +134,9 @@ export default function ReviewPage() {
       const result = await apiCall("/scan", { method: "POST" });
       setScanStatus(`Fetched ${result.fetched}, ${result.new} new (${result.skipped} already stored)`);
     } catch (e) {
-      setScanStatus(e instanceof Error ? `Error: ${e.message}` : "Scan failed");
+      if (!handleAuthError(e)) {
+        setScanStatus(e instanceof Error ? `Error: ${e.message}` : "Scan failed");
+      }
     } finally {
       setScanning(false);
     }
@@ -111,7 +153,9 @@ export default function ReviewPage() {
       );
       await loadCandidates();
     } catch (e) {
-      setExtractStatus(e instanceof Error ? `Error: ${e.message}` : "Extraction failed");
+      if (!handleAuthError(e)) {
+        setExtractStatus(e instanceof Error ? `Error: ${e.message}` : "Extraction failed");
+      }
     } finally {
       setExtracting(false);
     }
@@ -140,7 +184,9 @@ export default function ReviewPage() {
       setEditingId(null);
       await loadCandidates();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save edit");
+      if (!handleAuthError(e)) {
+        setError(e instanceof Error ? e.message : "Failed to save edit");
+      }
     } finally {
       setBusyId(null);
     }
@@ -152,7 +198,9 @@ export default function ReviewPage() {
       await apiCall(`/candidates/${id}/approve`, { method: "POST" });
       await loadCandidates();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to approve candidate");
+      if (!handleAuthError(e)) {
+        setError(e instanceof Error ? e.message : "Failed to approve candidate");
+      }
     } finally {
       setBusyId(null);
     }
@@ -164,7 +212,9 @@ export default function ReviewPage() {
       await apiCall(`/candidates/${id}/dismiss`, { method: "POST" });
       await loadCandidates();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to dismiss candidate");
+      if (!handleAuthError(e)) {
+        setError(e instanceof Error ? e.message : "Failed to dismiss candidate");
+      }
     } finally {
       setBusyId(null);
     }
@@ -182,7 +232,9 @@ export default function ReviewPage() {
       });
       await loadCandidates();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add to calendar");
+      if (!handleAuthError(e)) {
+        setError(e instanceof Error ? e.message : "Failed to add to calendar");
+      }
     } finally {
       setBusyId(null);
     }
@@ -205,14 +257,29 @@ export default function ReviewPage() {
     enabled: editingId === null && busyId === null,
   });
 
+  if (loggedIn === null) {
+    return null; // sessionStorage check in flight — avoids a login-screen flash on reload
+  }
+
+  if (!loggedIn) {
+    return (
+      <>
+        {demoMode && <div className={styles.demoBanner}>Demo mode — synthetic data, no real Gmail/Notion access</div>}
+        <LoginScreen onSuccess={() => setLoggedIn(true)} />
+      </>
+    );
+  }
+
   return (
     <main className={styles.main}>
+      {demoMode && <div className={styles.demoBanner}>Demo mode — synthetic data, no real Gmail/Notion access</div>}
       <div className={styles.headerRow}>
         <h1 className={styles.title}>Inbox-to-Action</h1>
         <span className={styles.liveIndicator}>
           <span className={`${styles.liveDot} ${connected ? styles.connected : ""}`} />
           {connected ? "Live" : "Connecting…"}
         </span>
+        {!demoMode && <button onClick={logout}>Log out</button>}
       </div>
       <p className={styles.subtitle}>
         Gmail is checked automatically every ~2 minutes. Review task candidates before they go to

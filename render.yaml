@@ -3,6 +3,12 @@ databases:
     plan: free
     databaseName: inbox_to_action
     user: inbox
+  # Separate DB for the public demo pair below — never shares storage
+  # with the private instance's real (eventually) Gmail/Notion-linked data.
+  - name: inbox-to-action-demo-db
+    plan: free
+    databaseName: inbox_to_action_demo
+    user: inbox_demo
 
 services:
   # FastAPI backend — single process, single instance (see CLAUDE.md: the
@@ -30,6 +36,8 @@ services:
         value: "120"
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: APP_ACCESS_TOKEN
+        sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -53,3 +61,48 @@ services:
         value: "20.11.1"
       - key: NEXT_PUBLIC_API_URL
         value: https://inbox-to-action-api.onrender.com
+
+  # Public demo pair (security hardening). Same codebase, DEMO_MODE=true:
+  # no Gmail/Notion/Calendar calls, a fixed synthetic inbox seeded at
+  # startup, and an in-memory fake Notion on approve (app/demo_data.py,
+  # app/demo_notion.py). No APP_ACCESS_TOKEN here — DEMO_MODE makes
+  # app/auth.py skip the token check entirely, since every write this
+  # instance can reach is harmless by construction. The private instance
+  # above is unaffected either way: its own APP_ACCESS_TOKEN still fails
+  # closed as long as DEMO_MODE is unset there.
+  - type: web
+    name: inbox-to-action-demo-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DEMO_MODE
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: inbox-to-action-demo-db
+          property: connectionString
+      - key: ALLOWED_ORIGINS
+        value: https://inbox-to-action-demo-web.onrender.com
+      # Needed for real Claude extraction on the synthetic emails — demo
+      # mode only skips Gmail/Notion/Calendar, never the Claude call
+      # that's the actual point of the demo. Use a key with its own
+      # spend limit; this service is public.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  - type: web
+    name: inbox-to-action-demo-web
+    runtime: node
+    plan: free
+    buildCommand: cd web && npm install && npm run build
+    startCommand: cd web && npm run start -- -p $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: "20.11.1"
+      - key: NEXT_PUBLIC_API_URL
+        value: https://inbox-to-action-demo-api.onrender.com

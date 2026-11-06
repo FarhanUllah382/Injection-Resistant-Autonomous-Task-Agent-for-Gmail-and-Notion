@@ -1,5 +1,11 @@
 # Inbox-to-Action
 
+[![CI](https://github.com/FarhanUllah382/Injection-Resistant-Autonomous-Task-Agent-for-Gmail-and-Notion/actions/workflows/ci.yml/badge.svg)](https://github.com/FarhanUllah382/Injection-Resistant-Autonomous-Task-Agent-for-Gmail-and-Notion/actions/workflows/ci.yml)
+
+**Gmail → Claude → a human-approved task in Notion — built around treating inbox content as adversarial input, not just data to summarize.**
+
+🔗 **[Live demo](https://inbox-to-action-demo-web.onrender.com)** — a fixed synthetic inbox (including two prompt-injection attempts and a spoofed sender), no real Gmail/Notion/Calendar access. Free-tier Render service: if it's been idle, the first load can take ~45s to wake up.
+
 Gmail is where work arrives. Notion is where work gets tracked. Nothing bridges them automatically — so tasks buried in email either get manually copied over or forgotten.
 
 Inbox-to-Action is that bridge. It watches a Gmail inbox, uses Claude to figure out which emails actually contain a request directed at you, and shows you a clean queue of candidate tasks. You approve, edit, or dismiss each one. **Only on explicit approval does anything get written to Notion.** The system never acts on your inbox by itself.
@@ -92,7 +98,7 @@ pip install -r requirements.txt
 cd web && npm install && cd ..
 
 # 2. Configure environment
-cp .env.example .env                          # fill in ANTHROPIC_API_KEY, GOOGLE_CLIENT_ID/SECRET, NOTION_*, USER_TIMEZONE
+cp .env.example .env                          # fill in ANTHROPIC_API_KEY, APP_ACCESS_TOKEN, GOOGLE_CLIENT_ID/SECRET, NOTION_*, USER_TIMEZONE
 cp web/.env.local.example web/.env.local       # default (http://localhost:8000) is fine unless the backend runs elsewhere
 
 # 3. Start Postgres
@@ -104,6 +110,8 @@ uvicorn app.main:app --reload
 # 5. Start the review UI (separate terminal)
 cd web && npm run dev
 ```
+
+Every route except `/health` and the Google OAuth callback requires the `APP_ACCESS_TOKEN` you set in step 2 (see "Security model" below) — the review UI will prompt for it once, in a plain login screen, and keep it in `sessionStorage` for that browser tab. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
 Open `http://localhost:3000`, connect Gmail via the login flow, and the pipeline runs on its own from there — a "Scan Gmail now" / "Extract tasks now" pair of buttons is also available for on-demand testing without waiting for the next poll.
 
@@ -119,7 +127,28 @@ Current result on the 15-email hand-labeled set: **100% precision and recall** o
 
 ## Design process
 
-See [`CHANGELOG.md`](CHANGELOG.md) for what shipped in each phase. Every phase past the initial MVP was designed before it was built — `DESIGN_DECISIONS_V2.1.md` through `V2.7.md` at the repo root each lay out the specific questions a phase raised (build vs. adopt an integration, what a "trust policy" should actually gate, how prompt-injection defense changes the rollout order of an otherwise-approved feature) and the reasoning behind each call, ahead of writing any code for it. `CLAUDE.md` captures the standing constraints those decisions operate inside — precision over recall, no background infrastructure until a phase genuinely needs it, nothing auto-created without a human in the loop.
+See [`CHANGELOG.md`](CHANGELOG.md) for what shipped in each phase. Every phase past the initial MVP was designed before it was built — `docs/DESIGN_DECISIONS_V2.1.md` through `V2.7.md` each lay out the specific questions a phase raised (build vs. adopt an integration, what a "trust policy" should actually gate, how prompt-injection defense changes the rollout order of an otherwise-approved feature) and the reasoning behind each call, ahead of writing any code for it. `CLAUDE.md` captures the standing constraints those decisions operate inside — precision over recall, no background infrastructure until a phase genuinely needs it, nothing auto-created without a human in the loop.
+
+## Security model
+
+- **Auth.** Every route except `GET /health` and the Google OAuth callback requires `Authorization: Bearer <APP_ACCESS_TOKEN>`, checked with a constant-time comparison (`app/auth.py`). Unset or shorter than 32 characters fails every request closed (401) — it never falls back to "no auth required." `GET /events` (Server-Sent Events) accepts the same token as a query parameter too, since the browser's native `EventSource` API can't send custom headers.
+- **Human approval is structurally required, not a UI convention.** `POST /candidates/{id}/approve` is the only code path in the codebase that calls the Notion API. There is no flag that routes around it.
+- **Injection handling.** Email content reaches Claude inside explicit `<email_content>` tags with an instruction to treat it as untrusted data to analyze, never as instructions to follow. The model's own `injection_suspected` field is a hard override in the policy engine (`app/policy.py`), regardless of extraction confidence.
+- **Sender trust.** `app/sender_trust.py` is a deterministic, content-independent check for identity spoofing (e.g. a corporate-directory-style display name with no connection to its free-webmail address) — added because a well-formed, high-confidence request from a spoofed sender passes every content-level check by design. Also a hard override.
+- **Rate limits.** `POST /scan` and `POST /extract` are capped (in-process, no Redis — see CLAUDE.md's V1 constraints) so a leaked token can't be used to burn Claude/Gmail API credits in a loop. The automatic ~2-minute poll calls the same underlying functions directly and isn't subject to this limit — its own interval already bounds it.
+- **Public demo mode is isolated by construction, not by the same auth boundary.** `DEMO_MODE=true` (used only by the demo service pair in `render.yaml`) makes the auth check pass through unconditionally — there's no real token protecting it — but every write it can reach is fake: synthetic seed emails (`app/demo_data.py`), no Gmail/Notion/Calendar calls, and "approve" writes to an in-memory fake Notion (`app/demo_notion.py`) that's gone on restart. The private instance is unaffected by any of this as long as `DEMO_MODE` is unset there.
+
+## Limitations
+
+Documented honestly rather than omitted:
+
+- **Single-owner, single-process, V1-scoped.** One Gmail account, one Postgres instance, no horizontal scaling (the in-process scheduler and OAuth pending-flow state are both in-memory — see `render.yaml`'s comment on the real API service). This is a deliberate MVP boundary (`CLAUDE.md`), not an oversight.
+- **The rate limiter is in-memory and per-process.** It resets on every restart/redeploy and wouldn't coordinate across multiple instances — adequate for a single-instance app, not a general-purpose limiter.
+- **`CONFIDENCE_THRESHOLD` and `AUTO_CONFIDENCE_THRESHOLD` are starting values**, tuned against a 15-email hand-labeled set and a small adversarial set (`phase1_extraction/`) — real, reproducible numbers on those sets, not a claim of accuracy at production scale or on inboxes very different from the ones evaluated.
+- **The auto-eligible policy decision is shadow-mode only.** It's computed and stored on every candidate for later evaluation; nothing in the codebase currently acts on it — every candidate still requires a human to approve/edit/dismiss it (see `AUTO_ACT_ENABLED` in `app/config.py`).
+- **The sender-trust and injection checks are evaluated against a small, hand-built adversarial set** (`phase1_extraction/adversarial_test_emails.jsonl`), not a large or continuously-updated one — they catch the specific patterns that set covers, not every possible spoofing or injection technique.
+- **Auth-failure detection in the automatic poller is a best-effort string match** against Google's refresh-error text (`app/scheduler.py`), not a typed exception — documented in that module as a known gap, not verified against a real revoked token as part of this work.
+- **The demo deployment needs its own Anthropic API key with its own spend limit.** `DEMO_MODE` skips Gmail/Notion/Calendar calls, but still runs real Claude extraction on the synthetic inbox — that's the actual point of the demo — so it isn't free to run indefinitely.
 
 ## Explicitly out of scope (for now)
 

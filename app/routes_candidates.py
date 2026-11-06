@@ -15,9 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, and_, or_, select
 
-from app.config import CONFIDENCE_THRESHOLD, NOTION_API_KEY, NOTION_DATABASE_ID
+from app.config import CONFIDENCE_THRESHOLD, DEMO_MODE, NOTION_API_KEY, NOTION_DATABASE_ID
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
+from app.demo_notion import create_fake_task_page
 from app.mcp_clients import notion_session, unwrap
 from app.models import CalendarBooking, Email, NotionTask, TaskCandidate, User, UserDecision
 
@@ -199,22 +200,37 @@ async def approve_candidate(candidate_id: int, session: Session = Depends(get_se
     # through the Notion MCP server (mcp_servers/notion_mcp), which wraps
     # app/notion_client.py unchanged — same Notion SDK call as V1, new
     # transport (Design Decisions V2.1, Decisions 2 & 5).
-    async with notion_session(NOTION_API_KEY, NOTION_DATABASE_ID) as mcp:
-        result = unwrap(
-            await mcp.call_tool(
-                "create_notion_task",
-                {
-                    "task": task,
-                    "reason": candidate.claude_reason,
-                    "gmail_link": _gmail_link(email.message_id),
-                    "resolved_due_date": resolved_due_date.isoformat() if resolved_due_date else None,
-                    "assignee": assignee,
-                },
-            )
+    #
+    # DEMO_MODE: this instance never has a real Notion API key — approving
+    # writes to an in-memory fake store instead (app/demo_notion.py),
+    # clearly labelled sync_status="demo_fake" below, never a real page.
+    if DEMO_MODE:
+        notion_page_id = create_fake_task_page(
+            task=task,
+            resolved_due_date=resolved_due_date,
+            assignee=assignee,
+            reason=candidate.claude_reason,
+            gmail_link=_gmail_link(email.message_id),
         )
-    if "error" in result:
-        raise HTTPException(502, f"Failed to create Notion task: {result['error']}")
-    notion_page_id = result["page_id"]
+        sync_status = "demo_fake"
+    else:
+        async with notion_session(NOTION_API_KEY, NOTION_DATABASE_ID) as mcp:
+            result = unwrap(
+                await mcp.call_tool(
+                    "create_notion_task",
+                    {
+                        "task": task,
+                        "reason": candidate.claude_reason,
+                        "gmail_link": _gmail_link(email.message_id),
+                        "resolved_due_date": resolved_due_date.isoformat() if resolved_due_date else None,
+                        "assignee": assignee,
+                    },
+                )
+            )
+        if "error" in result:
+            raise HTTPException(502, f"Failed to create Notion task: {result['error']}")
+        notion_page_id = result["page_id"]
+        sync_status = "synced"
 
     candidate.resolved_due_date = resolved_due_date
     candidate.status = "approved"
@@ -222,7 +238,7 @@ async def approve_candidate(candidate_id: int, session: Session = Depends(get_se
     session.add(
         UserDecision(candidate_id=candidate.id, user_id=user.id, action="approved", changed_fields=None)
     )
-    session.add(NotionTask(candidate_id=candidate.id, notion_page_id=notion_page_id, sync_status="synced"))
+    session.add(NotionTask(candidate_id=candidate.id, notion_page_id=notion_page_id, sync_status=sync_status))
     session.commit()
     session.refresh(candidate)
 

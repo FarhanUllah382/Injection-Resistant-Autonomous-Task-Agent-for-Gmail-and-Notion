@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes by phase. Each phase has a corresponding `DESIGN_DECISIONS_V2.x.md` document written and reasoned through before implementation.
+Notable changes by phase. Each phase has a corresponding `docs/DESIGN_DECISIONS_V2.x.md` document written and reasoned through before implementation.
 
 ## V2.7 — Continuous monitoring + review UI redesign
 

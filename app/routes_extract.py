@@ -75,7 +75,7 @@ from fastapi import APIRouter, Depends
 
 from sqlmodel import Session, select
 
-from app.config import THREAD_CONTEXT_DEPTH
+from app.config import DEMO_MODE, THREAD_CONTEXT_DEPTH
 from app.correction_notes import get_active_notes
 from app.db import get_session
 from app.deadline_resolver import resolve_deadline_phrase
@@ -83,6 +83,7 @@ from app.events import event_bus
 from app.meeting_time_resolver import resolve_meeting_time_phrase
 from app.models import Email, EmailAccount, TaskCandidate, User
 from app.policy import compute_policy
+from app.rate_limit import rate_limit_extract
 from app.scheduling import check_availability
 from app.sender_trust import sender_trust_signal
 from app.triage import should_triage_out
@@ -263,7 +264,10 @@ async def run_extract(session: Session, max_emails: int = 20) -> dict:
             # (Decision 6 — those don't gate candidate creation today, so
             # there's nothing new to filter on here).
             if scheduling_time is not None:
-                if account is None:
+                if account is None or DEMO_MODE:
+                    # DEMO_MODE: never call the real Calendar API, even
+                    # though a (placeholder-token) account row exists to
+                    # satisfy Email's foreign key — see app/demo_data.py.
                     candidate.calendar_status = "unavailable"
                 else:
                     candidate.calendar_status, candidate.suggested_meeting_slots = (
@@ -303,6 +307,6 @@ async def run_extract(session: Session, max_emails: int = 20) -> dict:
     }
 
 
-@router.post("/extract")
+@router.post("/extract", dependencies=[Depends(rate_limit_extract)])
 async def extract(max_emails: int = 20, session: Session = Depends(get_session)):
     return await run_extract(session, max_emails)

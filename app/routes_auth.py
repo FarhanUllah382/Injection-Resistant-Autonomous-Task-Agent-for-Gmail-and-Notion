@@ -4,6 +4,16 @@ Gmail OAuth2 routes.
 Single-process, single-user MVP: pending authorization state is kept in an
 in-memory dict rather than a session store or Redis (see CLAUDE.md V1
 constraints — no Redis, one process).
+
+/login is bearer-token-protected like every other route (app/auth.py) —
+connecting Gmail is an owner-only action. It's not wired into the review
+UI as a clickable link for exactly that reason: a plain browser navigation
+can't carry an Authorization header. Bootstrap it once with curl, e.g.
+`curl -H "Authorization: Bearer $APP_ACCESS_TOKEN" -D - <api>/auth/google/login`
+and open the redirect's Location in a browser. /callback stays public
+below — Google redirects the browser there directly, with no way to
+attach that header either, and the one-time `state` token it carries
+already ties it to a login this app itself started.
 """
 
 from datetime import datetime, timezone as dt_timezone
@@ -14,6 +24,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from sqlmodel import Session, select
 
+from app.auth import require_token
 from app.config import USER_TIMEZONE
 from app.db import get_session
 from app.gmail_oauth import build_flow
@@ -25,7 +36,7 @@ router = APIRouter(prefix="/auth/google", tags=["auth"])
 _pending_flows: dict[str, Flow] = {}
 
 
-@router.get("/login")
+@router.get("/login", dependencies=[Depends(require_token)])
 def login():
     flow = build_flow()
     authorization_url, state = flow.authorization_url(
