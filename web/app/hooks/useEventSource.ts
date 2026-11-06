@@ -41,7 +41,10 @@ export function useEventSource(onEvent: (event: LiveEvent) => void, enabled: boo
     // nothing. No token at all is valid in DEMO_MODE (the backend's
     // require_token_header_or_query passes everything through there).
     if (!enabled) {
-      setConnected(false);
+      // Deferred through a microtask, same pattern as page.tsx's initial
+      // load effect — calling setState synchronously within an effect
+      // body is flagged by react-hooks/set-state-in-effect.
+      queueMicrotask(() => setConnected(false));
       return;
     }
     const token = getToken();
