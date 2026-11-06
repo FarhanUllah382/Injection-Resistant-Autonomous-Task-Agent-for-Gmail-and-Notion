@@ -1,30 +1,35 @@
-anthropic>=0.38.0
+anthropic==0.122.0
 # anthropic>=1.0 depends on httpx2 (its httpx successor) rather than httpx.
 # Imported directly in phase1_extraction/extractor.py to force IPv4 (see
 # that file's comment) — already pulled in transitively by anthropic, but
 # pinned explicitly here since we import it ourselves, not just anthropic.
-httpx2>=2.0.0,<3
-python-dotenv>=1.0.0
+httpx2==2.10.0
+python-dotenv==1.2.2
 
 # Phase 2: backend
-fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
-sqlmodel>=0.0.22
-psycopg2-binary>=2.9.9
-google-auth>=2.35.0
-google-auth-oauthlib>=1.2.1
-google-api-python-client>=2.149.0
-beautifulsoup4>=4.12.3
+fastapi==0.141.1
+uvicorn[standard]==0.46.0
+sqlmodel==0.0.39
+psycopg2-binary==2.9.12
+google-auth==2.56.3
+google-auth-oauthlib==1.4.0
+google-api-python-client==2.194.0
+beautifulsoup4==4.15.0
 
 # Phase 4: Notion — official SDK for the single page-create call on approve
-notion-client>=2.2.1
+notion-client==3.1.0
 
 # V2.1: MCP client/server SDK — backend talks to mcp_servers/*/server.py over
-# stdio (Design Decisions V2.1, Decision 3); pinned <2.0 for the stable
-# FastMCP/stdio-client API (2.x renamed the server API and is very new)
-mcp>=1.6.0,<2.0.0
+# stdio (Design Decisions V2.1, Decision 3)
+mcp==1.29.0
 
 # V2.7: in-process ~2-min Gmail poll inside the existing FastAPI process —
 # avoids adding Celery/Redis; CLAUDE.md's "no background workers" default is
 # deliberately superseded here (Design Decisions V2.7, Decision 1)
-apscheduler>=3.10,<4.0
+apscheduler==3.11.3
+
+# Security hardening: test suite (tests/) + CI (.github/workflows/ci.yml).
+# httpx (not httpx2) is what FastAPI/Starlette's TestClient requires —
+# unrelated to the IPv4 Anthropic client's httpx2 dependency above.
+pytest==9.0.2
+httpx==0.28.1

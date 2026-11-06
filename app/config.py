@@ -10,6 +10,14 @@ load_dotenv()
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Public demo mode (security hardening) — when true, no real Gmail/Notion/
+# Calendar calls are made: the pipeline runs against a fixed set of
+# synthetic seed emails and "approve" writes to an in-memory fake Notion
+# instead of the real API. See app/demo_data.py. Never true on the private
+# instance; Render's demo service pair (render.yaml) is the only place
+# this is set.
+DEMO_MODE = os.getenv("DEMO_MODE", "false").strip().lower() == "true"
+
 # Anthropic API (reused from Phase 1)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = "claude-sonnet-5"

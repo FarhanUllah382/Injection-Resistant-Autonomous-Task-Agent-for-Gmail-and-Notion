@@ -20,10 +20,11 @@ an existing endpoint.
 import asyncio
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app import scheduler
+from app.auth import require_token, require_token_header_or_query
 from app.events import event_bus
 
 router = APIRouter(tags=["events"])
@@ -31,7 +32,7 @@ router = APIRouter(tags=["events"])
 _KEEPALIVE_SECONDS = 15
 
 
-@router.get("/events")
+@router.get("/events", dependencies=[Depends(require_token_header_or_query)])
 async def stream_events():
     async def event_stream():
         queue = event_bus.subscribe_queue()
@@ -53,6 +54,6 @@ async def stream_events():
     )
 
 
-@router.get("/scheduler/status")
+@router.get("/scheduler/status", dependencies=[Depends(require_token)])
 def scheduler_status():
     return scheduler.get_status()

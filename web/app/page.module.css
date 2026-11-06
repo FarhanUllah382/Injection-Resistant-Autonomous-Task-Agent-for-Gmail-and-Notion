@@ -68,3 +68,14 @@
   color: var(--danger);
   margin-bottom: var(--space-4);
 }
+
+.demoBanner {
+  background: var(--status-pending-bg);
+  color: var(--status-pending-fg);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-align: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-4);
+}

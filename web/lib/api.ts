@@ -3,7 +3,14 @@
 // orchestration and the new components under app/components/ can import
 // these without a circular dependency on the page itself.
 
+import { clearToken, getToken } from "./auth";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// Thrown when the backend rejects the stored token (missing, wrong, or
+// never set) — page.tsx catches this specifically to drop back to the
+// login screen instead of just showing a generic error banner.
+export class AuthError extends Error {}
 
 // resolved_meeting_time comes back from the API as a naive ISO string
 // (no offset) whose underlying instant is UTC — Postgres TIMESTAMP
@@ -59,10 +66,21 @@ export type Candidate = {
 export type EditForm = { task: string; deadline_phrase: string; assignee: string };
 
 export async function apiCall(path: string, options?: RequestInit) {
+  const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     ...options,
   });
+  if (res.status === 401) {
+    // The stored token is missing, wrong, or the backend's
+    // APP_ACCESS_TOKEN changed/was unset — drop it and force a fresh
+    // login rather than retrying with a token that will never work.
+    clearToken();
+    throw new AuthError("Session expired — please log in again");
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Request failed (${res.status})`);
